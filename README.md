@@ -1,0 +1,103 @@
+# NUS Assistant Bot
+
+A Telegram bot that helps NUS students manage their Canvas LMS assignments, quizzes, files, and deadlines — all from Telegram.
+
+## Use the Bot
+
+Start chatting with [@nusassistant_bot](https://t.me/nusassistant_bot) on Telegram and run `/setup` to link your Canvas account.
+
+You'll need a **Canvas API token** — generate one from [Canvas](https://canvas.nus.edu.sg) > Account > Settings > New Access Token.
+
+### What it can do
+
+| Command | Description |
+|---------|-------------|
+| `/assignments` | Browse assignments and quizzes by course |
+| `/due [days]` | View upcoming deadlines (default 7 days) |
+| `/files` | Browse and open course files |
+| `/notes` | View your personal notes |
+| `/start_notes` | Capture freeform notes |
+| `/todos` | Manage personal to-dos per course |
+| `/reminder [hour]` | Set a daily deadline reminder (SGT) |
+| `/help` | Full command list |
+
+---
+
+## Self-Hosting
+
+Want to run your own instance? Follow the steps below.
+
+### Prerequisites
+
+- Python 3.11+
+- A Telegram bot token from [@BotFather](https://t.me/BotFather)
+- Access to a Canvas LMS instance
+
+### 1. Clone and install
+
+```bash
+git clone https://github.com/lavanyagarg112/nus-assistant-bot.git
+cd nus-assistant-bot
+
+python3 -m venv venv
+source venv/bin/activate
+
+pip install -r requirements.txt
+```
+
+### 2. Configure
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and fill in:
+
+| Variable | Description |
+|----------|-------------|
+| `TELEGRAM_BOT_TOKEN` | From [@BotFather](https://t.me/BotFather) |
+| `FERNET_KEY` | Encryption key for Canvas tokens (see below) |
+| `CANVAS_BASE_URL` | Your Canvas instance URL (default: `https://canvas.nus.edu.sg`) |
+
+Generate a Fernet key:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+### 3. Run
+
+```bash
+python main.py
+```
+
+The bot will initialise the SQLite database on first run and start polling for messages.
+
+### Project Structure
+
+```
+├── main.py                  # Entry point, handler registration, reminder jobs
+├── config.py                # Environment variable loading and validation
+├── bot/
+│   ├── keyboards.py         # Inline keyboard builders
+│   └── handlers/
+│       ├── start.py         # /start, /help, /menu, /cancel
+│       ├── settings.py      # /setup, /unlink, /reminder
+│       ├── assignments.py   # /assignments, /due, assignment/quiz detail
+│       ├── notes.py         # /notes, /start_notes, /end_notes
+│       ├── files.py         # /files, folder browsing
+│       └── todos.py         # /todos, /add_todo
+├── canvas/
+│   └── client.py            # Async Canvas LMS API client
+├── db/
+│   ├── database.py          # SQLite schema and connection management
+│   └── models.py            # CRUD operations
+├── requirements.txt
+└── .env.example
+```
+
+### Key Details
+
+- **Database** — SQLite with WAL mode, stored as `bot.db` by default
+- **Token storage** — Canvas API tokens are encrypted at rest using Fernet
+- **Reminders** — Users set their preferred hour (SGT) via `/reminder` and get a daily push with deadlines due in the next 48 hours
