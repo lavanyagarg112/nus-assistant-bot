@@ -11,3 +11,5 @@ dist/
 build/
 *.pem
 github_token.txt
+notes.txt
+thoughts.txt
