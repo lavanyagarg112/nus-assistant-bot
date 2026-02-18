@@ -10,3 +10,4 @@ venv/
 dist/
 build/
 *.pem
+github_token.txt
