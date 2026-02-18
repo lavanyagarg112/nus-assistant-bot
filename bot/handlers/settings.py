@@ -68,8 +68,8 @@ async def setup_receive_token(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.effective_chat.send_message("Verifying your token...")
     try:
         courses = await canvas.get_courses(token)
-    except Exception as e:
-        logger.warning("Token validation failed for user %s: %s", telegram_id, e)
+    except Exception:
+        logger.warning("Token validation failed for user %s", telegram_id)
         await update.effective_chat.send_message(
             "That token doesn't seem to work. Please check it and try /setup again."
         )

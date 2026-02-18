@@ -50,8 +50,8 @@ async def assignments_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     loading = await msg.reply_text("Loading courses...")
     try:
         courses = await canvas.get_courses(token)
-    except Exception as e:
-        logger.error("Canvas API error: %s", e)
+    except Exception:
+        logger.error("Canvas API error fetching courses for user %s", update.effective_user.id)
         await loading.edit_text("Failed to fetch courses. Check your Canvas token with /setup.")
         return
 
@@ -73,8 +73,8 @@ async def assignments_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     try:
         courses = await canvas.get_courses(token)
-    except Exception as e:
-        logger.error("Canvas API error: %s", e)
+    except Exception:
+        logger.error("Canvas API error fetching courses for user %s", update.effective_user.id)
         await query.edit_message_text("Failed to fetch courses.")
         return
 
@@ -101,8 +101,8 @@ async def course_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await query.edit_message_text("Loading assignments and quizzes...")
     try:
         assignments = await canvas.get_assignments(token, course_id)
-    except Exception as e:
-        logger.error("Canvas API error: %s", e)
+    except Exception:
+        logger.error("Canvas API error fetching assignments for user %s", update.effective_user.id)
         await query.edit_message_text("Failed to fetch assignments.")
         return
 
@@ -143,8 +143,8 @@ async def assignment_detail_callback(
 
     try:
         assignment = await canvas.get_assignment(token, course_id, assignment_id)
-    except Exception as e:
-        logger.error("Canvas API error: %s", e)
+    except Exception:
+        logger.error("Canvas API error fetching assignment for user %s", update.effective_user.id)
         await query.edit_message_text("Failed to fetch assignment details.")
         return
 
@@ -194,8 +194,8 @@ async def quiz_detail_callback(
 
     try:
         quiz = await canvas.get_quiz(token, course_id, quiz_id)
-    except Exception as e:
-        logger.error("Canvas API error: %s", e)
+    except Exception:
+        logger.error("Canvas API error fetching quiz for user %s", update.effective_user.id)
         await query.edit_message_text("Failed to fetch quiz details.")
         return
 
@@ -269,8 +269,8 @@ async def due_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     loading = await msg.reply_text("Loading upcoming deadlines...")
     try:
         text = await _fetch_and_format_due(token, days)
-    except Exception as e:
-        logger.error("Canvas API error: %s", e)
+    except Exception:
+        logger.error("Canvas API error fetching deadlines for user %s", update.effective_user.id)
         await loading.edit_text("Failed to fetch assignments.")
         return
 
@@ -299,8 +299,8 @@ async def due_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await query.edit_message_text("Loading upcoming deadlines...")
     try:
         text = await _fetch_and_format_due(token, days)
-    except Exception as e:
-        logger.error("Canvas API error: %s", e)
+    except Exception:
+        logger.error("Canvas API error fetching deadlines for user %s", update.effective_user.id)
         await query.edit_message_text("Failed to fetch assignments.")
         return
 

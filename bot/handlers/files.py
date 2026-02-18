@@ -22,8 +22,8 @@ async def files_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     loading = await msg.reply_text("Loading courses...")
     try:
         courses = await canvas.get_courses(token)
-    except Exception as e:
-        logger.error("Canvas API error: %s", e)
+    except Exception:
+        logger.error("Canvas API error fetching courses for user %s", update.effective_user.id)
         await loading.edit_text("Failed to fetch courses.")
         return
 
@@ -46,8 +46,8 @@ async def files_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     try:
         courses = await canvas.get_courses(token)
-    except Exception as e:
-        logger.error("Canvas API error: %s", e)
+    except Exception:
+        logger.error("Canvas API error fetching courses for user %s", update.effective_user.id)
         await query.edit_message_text("Failed to fetch courses.")
         return
 
@@ -78,8 +78,8 @@ async def file_course_callback(
 
     try:
         root = await canvas.get_root_folder(token, course_id)
-    except Exception as e:
-        logger.error("Canvas API error: %s", e)
+    except Exception:
+        logger.error("Canvas API error fetching root folder for user %s", update.effective_user.id)
         await query.edit_message_text("Failed to load files for this course.")
         return
 
@@ -116,8 +116,8 @@ async def _show_folder(query, token: str, folder_id: int, course_id: int) -> Non
     try:
         subfolders = await canvas.get_subfolders(token, folder_id)
         files = await canvas.get_folder_files(token, folder_id)
-    except Exception as e:
-        logger.error("Canvas API error: %s", e)
+    except Exception:
+        logger.error("Canvas API error fetching folder %s", folder_id)
         await query.edit_message_text("Failed to load folder contents.")
         return
 
