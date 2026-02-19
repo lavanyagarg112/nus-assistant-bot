@@ -12,6 +12,7 @@ from telegram.ext import (
 
 from bot import keyboards
 from bot.handlers.assignments import _escape_md, _truncate_message
+from bot.utils import reply, reply_or_edit
 from canvas import client as canvas
 from db import models
 
@@ -27,7 +28,7 @@ async def todos_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     telegram_id = update.effective_user.id
     registered = await models.is_registered(telegram_id)
     if not registered:
-        await update.message.reply_text("You need to /setup first.")
+        await reply(update.message, context, "You need to /setup first.")
         return
 
     show_done = context.args and context.args[0] == "all"
@@ -37,11 +38,11 @@ async def todos_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         msg = "No todos yet! Use /add_todo to create one."
         if not show_done:
             msg += "\nUse /todos all to include completed items."
-        await update.message.reply_text(msg, reply_markup=keyboards.back_to_menu())
+        await reply(update.message, context, msg, reply_markup=keyboards.back_to_menu())
         return
 
     text, markup = await _format_todos(telegram_id, todos, show_done)
-    await update.message.reply_text(text, parse_mode="MarkdownV2", reply_markup=markup)
+    await reply(update.message, context, text, parse_mode="MarkdownV2", reply_markup=markup)
 
 
 async def todos_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -51,14 +52,15 @@ async def todos_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     todos = await models.get_todos(telegram_id, include_done=False)
     if not todos:
-        await query.edit_message_text(
+        await reply_or_edit(
+            query, context,
             "No todos yet! Use /add_todo to create one.",
             reply_markup=keyboards.back_to_menu(),
         )
         return
 
     text, markup = await _format_todos(telegram_id, todos, False)
-    await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=markup)
+    await reply_or_edit(query, context, text, parse_mode="MarkdownV2", reply_markup=markup)
 
 
 async def _format_todos(
@@ -105,11 +107,44 @@ async def _format_todos(
             ])
         lines.append("")
 
+    if show_done:
+        buttons.append([InlineKeyboardButton("Hide Completed", callback_data="todos_active")])
+    else:
+        buttons.append([InlineKeyboardButton("Show Completed", callback_data="todos_all")])
     buttons.append([InlineKeyboardButton("<< Back to Menu", callback_data="cmd_menu")])
     return _truncate_message("\n".join(lines)), InlineKeyboardMarkup(buttons)
 
 
+# ── Show all / active todos toggle ──
+
+
+async def todos_show_all_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    telegram_id = update.effective_user.id
+    show_done = query.data == "todos_all"
+
+    todos = await models.get_todos(telegram_id, include_done=show_done)
+    if not todos:
+        msg = "No todos yet! Use /add_todo to create one."
+        await query.edit_message_text(msg, reply_markup=keyboards.back_to_menu())
+        return
+
+    text, markup = await _format_todos(telegram_id, todos, show_done)
+    await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=markup)
+
+
 # ── Toggle todo done/undone ──
+
+
+def _is_showing_done(query) -> bool:
+    """Check if the current view is showing completed todos by inspecting the keyboard."""
+    if query.message and query.message.reply_markup:
+        for row in query.message.reply_markup.inline_keyboard:
+            for btn in row:
+                if btn.callback_data == "todos_active":
+                    return True  # "Hide Completed" button present → showing done
+    return False
 
 
 async def todo_toggle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -123,13 +158,14 @@ async def todo_toggle_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.edit_message_text("Todo not found.", reply_markup=keyboards.back_to_menu())
         return
 
-    # Re-render the list
-    todos = await models.get_todos(telegram_id, include_done=True)
+    # Re-render the list preserving the current view mode
+    show_done = _is_showing_done(query)
+    todos = await models.get_todos(telegram_id, include_done=show_done)
     if not todos:
         await query.edit_message_text("All done! No todos left.", reply_markup=keyboards.back_to_menu())
         return
 
-    text, markup = await _format_todos(telegram_id, todos, True)
+    text, markup = await _format_todos(telegram_id, todos, show_done)
     await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=markup)
 
 
@@ -144,13 +180,14 @@ async def todo_delete_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     await models.delete_todo(todo_id, telegram_id)
 
-    # Re-render the list
-    todos = await models.get_todos(telegram_id, include_done=False)
+    # Re-render the list preserving the current view mode
+    show_done = _is_showing_done(query)
+    todos = await models.get_todos(telegram_id, include_done=show_done)
     if not todos:
         await query.edit_message_text("No todos left! Use /add_todo to create one.", reply_markup=keyboards.back_to_menu())
         return
 
-    text, markup = await _format_todos(telegram_id, todos, False)
+    text, markup = await _format_todos(telegram_id, todos, show_done)
     await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=markup)
 
 
@@ -161,13 +198,13 @@ async def add_todo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     telegram_id = update.effective_user.id
     token = await models.get_canvas_token(telegram_id)
     if not token:
-        await update.message.reply_text("You need to /setup first.")
+        await reply(update.message, context, "You need to /setup first.")
         return
 
     try:
         courses = await canvas.get_courses(token)
     except Exception:
-        await update.message.reply_text("Failed to fetch courses.")
+        await reply(update.message, context, "Failed to fetch courses.")
         return
 
     buttons = [
@@ -177,7 +214,8 @@ async def add_todo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     buttons.append([InlineKeyboardButton("General (no course)", callback_data="todocourse_0")])
     buttons.append([InlineKeyboardButton("<< Cancel", callback_data="cmd_menu")])
 
-    await update.message.reply_text(
+    await reply(
+        update.message, context,
         "Which course is this todo for?",
         reply_markup=InlineKeyboardMarkup(buttons),
     )
@@ -190,7 +228,16 @@ async def add_todo_course_callback(update: Update, context: ContextTypes.DEFAULT
     course_id = int(query.data.split("_")[1])
     context.user_data["todo_course_id"] = course_id if course_id != 0 else None
 
-    await query.edit_message_text("Type your todo text (or /cancel):")
+    # Find the course name from the button that was clicked
+    course_label = "General"
+    if query.message and query.message.reply_markup:
+        for row in query.message.reply_markup.inline_keyboard:
+            for btn in row:
+                if btn.callback_data == query.data:
+                    course_label = btn.text
+                    break
+
+    await query.edit_message_text(f"Course: {course_label}\n\nType your todo text (or /cancel):")
     return WAITING_TODO_TEXT
 
 
@@ -200,11 +247,12 @@ MAX_TODO_LENGTH = 500
 async def add_todo_receive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     text = update.message.text.strip()
     if not text:
-        await update.message.reply_text("Todo can't be empty. Try again or /cancel.")
+        await reply(update.message, context, "Todo can't be empty. Try again or /cancel.")
         return WAITING_TODO_TEXT
 
     if len(text) > MAX_TODO_LENGTH:
-        await update.message.reply_text(
+        await reply(
+            update.message, context,
             f"Todo is too long ({len(text)} chars). Max is {MAX_TODO_LENGTH}. Please shorten it."
         )
         return WAITING_TODO_TEXT
@@ -213,13 +261,13 @@ async def add_todo_receive(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     course_id = context.user_data.pop("todo_course_id", None)
 
     await models.add_todo(telegram_id, text, course_id)
-    await update.message.reply_text("Todo added! View with /todos.", reply_markup=keyboards.back_to_menu())
+    await reply(update.message, context, "Todo added! View with /todos.", reply_markup=keyboards.back_to_menu())
     return ConversationHandler.END
 
 
 async def add_todo_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.pop("todo_course_id", None)
-    await update.message.reply_text("Cancelled.", reply_markup=keyboards.back_to_menu())
+    await reply(update.message, context, "Cancelled.", reply_markup=keyboards.back_to_menu())
     return ConversationHandler.END
 
 

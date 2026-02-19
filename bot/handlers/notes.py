@@ -12,6 +12,7 @@ from telegram.ext import (
 
 from bot import keyboards
 from bot.handlers.assignments import _escape_md, _require_token, _truncate_message
+from bot.utils import reply, reply_or_edit
 from canvas import client as canvas
 from db import models
 
@@ -19,13 +20,14 @@ logger = logging.getLogger(__name__)
 
 WAITING_NOTE = 0
 CAPTURING_QUICKNOTE = 1
+WAITING_SEARCH_QUERY = 2
 
 
 # ── /notes command: list all notes ──
 
 
 async def notes_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    token = await _require_token(update)
+    token = await _require_token(update, context)
     if not token:
         return
 
@@ -34,26 +36,28 @@ async def notes_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     general_notes = await models.get_all_general_notes(user_id)
 
     if not assignment_notes and not general_notes:
-        await update.message.reply_text(
+        await reply(
+            update.message, context,
             "You don't have any notes yet.\n"
             "Browse /assignments to add notes, or use /start_notes for freeform capture.",
-            reply_markup=keyboards.back_to_menu(),
+            reply_markup=keyboards.notes_menu(),
         )
         return
 
     lines = await _format_notes(token, assignment_notes, general_notes)
 
-    await update.message.reply_text(
+    await reply(
+        update.message, context,
         "\n".join(lines),
         parse_mode="MarkdownV2",
-        reply_markup=keyboards.back_to_menu(),
+        reply_markup=keyboards.notes_menu(),
     )
 
 
 async def notes_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-    token = await _require_token(update)
+    token = await _require_token(update, context)
     if not token:
         return
 
@@ -62,19 +66,21 @@ async def notes_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     general_notes = await models.get_all_general_notes(user_id)
 
     if not assignment_notes and not general_notes:
-        await query.edit_message_text(
+        await reply_or_edit(
+            query, context,
             "You don't have any notes yet.\n"
             "Browse /assignments to add notes, or use /start_notes for freeform capture.",
-            reply_markup=keyboards.back_to_menu(),
+            reply_markup=keyboards.notes_menu(),
         )
         return
 
     lines = await _format_notes(token, assignment_notes, general_notes)
 
-    await query.edit_message_text(
+    await reply_or_edit(
+        query, context,
         "\n".join(lines),
         parse_mode="MarkdownV2",
-        reply_markup=keyboards.back_to_menu(),
+        reply_markup=keyboards.notes_menu(),
     )
 
 
@@ -151,26 +157,28 @@ MAX_NOTE_LENGTH = 1000
 async def note_receive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     text = update.message.text.strip()
     if not text:
-        await update.message.reply_text("Note can't be empty. Try again or /cancel.")
+        await reply(update.message, context, "Note can't be empty. Try again or /cancel.")
         return WAITING_NOTE
 
     if len(text) > MAX_NOTE_LENGTH:
-        await update.message.reply_text(
+        await reply(
+            update.message, context,
             f"Note is too long ({len(text)} chars). Max is {MAX_NOTE_LENGTH}. Please shorten it."
         )
         return WAITING_NOTE
 
-    course_id = context.user_data.get("note_course_id")
-    assignment_id = context.user_data.get("note_assignment_id")
+    course_id = context.user_data.pop("note_course_id", None)
+    assignment_id = context.user_data.pop("note_assignment_id", None)
 
     if not course_id or not assignment_id:
-        await update.message.reply_text("Something went wrong. Please try again from /assignments.")
+        await reply(update.message, context, "Something went wrong. Please try again from /assignments.")
         return ConversationHandler.END
 
     await models.upsert_note(
         update.effective_user.id, assignment_id, course_id, text
     )
-    await update.message.reply_text(
+    await reply(
+        update.message, context,
         "Note saved!",
         reply_markup=keyboards.back_to_menu(),
     )
@@ -178,7 +186,7 @@ async def note_receive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 
 async def note_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text("Cancelled.", reply_markup=keyboards.back_to_menu())
+    await reply(update.message, context, "Cancelled.", reply_markup=keyboards.back_to_menu())
     return ConversationHandler.END
 
 
@@ -200,8 +208,99 @@ async def note_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await query.edit_message_text("No note found.", reply_markup=keyboards.back_to_menu())
 
 
+# ── Filter notes by type ──
+
+
+async def notes_filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    token = await _require_token(update, context)
+    if not token:
+        return
+
+    user_id = update.effective_user.id
+    # callback_data: "notes_filter_assignment" or "notes_filter_general"
+    filter_type = query.data.removeprefix("notes_filter_")
+
+    if filter_type == "assignment":
+        assignment_notes = await models.get_all_notes(user_id)
+        if not assignment_notes:
+            await query.edit_message_text(
+                "No assignment notes yet.\nBrowse /assignments to add notes.",
+                reply_markup=keyboards.back_to_notes(),
+            )
+            return
+        lines = await _format_notes(token, assignment_notes, [])
+    else:
+        general_notes = await models.get_all_general_notes(user_id)
+        if not general_notes:
+            await query.edit_message_text(
+                "No general notes yet.\nUse /start_notes for freeform capture.",
+                reply_markup=keyboards.back_to_notes(),
+            )
+            return
+        lines = await _format_notes(token, [], general_notes)
+
+    await query.edit_message_text(
+        "\n".join(lines),
+        parse_mode="MarkdownV2",
+        reply_markup=keyboards.back_to_notes(),
+    )
+
+
+# ── Search notes ──
+
+
+async def notes_search_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("Type your search query (or /cancel):")
+    return WAITING_SEARCH_QUERY
+
+
+async def notes_search_receive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query_text = update.message.text.strip()
+    if not query_text:
+        await reply(update.message, context, "Search query can't be empty. Try again or /cancel.")
+        return WAITING_SEARCH_QUERY
+
+    user_id = update.effective_user.id
+    token = await models.get_canvas_token(user_id)
+    if not token:
+        await reply(update.message, context, "You need to /setup first.", reply_markup=keyboards.back_to_menu())
+        return ConversationHandler.END
+
+    assignment_notes, general_notes = await models.search_notes(user_id, query_text)
+
+    if not assignment_notes and not general_notes:
+        await reply(
+            update.message, context,
+            f"No notes matching \"{query_text}\".",
+            reply_markup=keyboards.back_to_notes(),
+        )
+        return ConversationHandler.END
+
+    lines = await _format_notes(token, assignment_notes, general_notes)
+    header = f"*Search results for \"{_escape_md(query_text)}\"*\n\n"
+    text = header + "\n".join(lines)
+
+    await reply(
+        update.message, context,
+        _truncate_message(text),
+        parse_mode="MarkdownV2",
+        reply_markup=keyboards.back_to_notes(),
+    )
+    return ConversationHandler.END
+
+
+async def notes_search_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await reply(update.message, context, "Search cancelled.", reply_markup=keyboards.back_to_notes())
+    return ConversationHandler.END
+
+
 async def unknown_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(
+    await reply(
+        update.message, context,
         "I didn't understand that. Type /help to see available commands."
     )
 
@@ -212,10 +311,11 @@ async def unknown_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def start_notes_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     registered = await models.is_registered(update.effective_user.id)
     if not registered:
-        await update.message.reply_text("You need to /setup first before using notes.")
+        await reply(update.message, context, "You need to /setup first before using notes.")
         return ConversationHandler.END
     context.user_data["quicknote_lines"] = []
-    await update.message.reply_text(
+    await reply(
+        update.message, context,
         "Notes mode started. Send me anything and I'll capture it.\n\n"
         "When you're done, send /end_notes to save."
     )
@@ -231,25 +331,27 @@ async def quicknote_capture(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     new_text = update.message.text.strip()
 
     if total + len(new_text) > MAX_QUICKNOTE_TOTAL:
-        await update.message.reply_text(
+        await reply(
+            update.message, context,
             f"Note limit reached ({MAX_QUICKNOTE_TOTAL} chars). Send /end_notes to save what you have."
         )
         return CAPTURING_QUICKNOTE
 
     lines.append(new_text)
-    await update.message.reply_text("Got it. Keep going, or send /end_notes to save.")
+    await reply(update.message, context, "Got it. Keep going, or send /end_notes to save.")
     return CAPTURING_QUICKNOTE
 
 
 async def end_notes_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     lines = context.user_data.pop("quicknote_lines", [])
     if not lines:
-        await update.message.reply_text("No notes captured. Notes mode ended.")
+        await reply(update.message, context, "No notes captured. Notes mode ended.")
         return ConversationHandler.END
 
     content = "\n".join(lines)
     await models.add_general_note(update.effective_user.id, content)
-    await update.message.reply_text(
+    await reply(
+        update.message, context,
         "Notes saved! View them anytime with /notes.",
         reply_markup=keyboards.back_to_menu(),
     )
@@ -258,7 +360,7 @@ async def end_notes_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 async def quicknote_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.pop("quicknote_lines", None)
-    await update.message.reply_text("Notes mode cancelled. Nothing was saved.")
+    await reply(update.message, context, "Notes mode cancelled. Nothing was saved.")
     return ConversationHandler.END
 
 
@@ -273,6 +375,23 @@ def get_quicknote_handler() -> ConversationHandler:
         fallbacks=[
             CommandHandler("end_notes", end_notes_cmd),
             CommandHandler("cancel", quicknote_cancel),
+        ],
+        per_message=False,
+    )
+
+
+def get_search_handler() -> ConversationHandler:
+    return ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(notes_search_start, pattern=r"^notes_search$"),
+        ],
+        states={
+            WAITING_SEARCH_QUERY: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, notes_search_receive),
+            ],
+        },
+        fallbacks=[
+            CommandHandler("cancel", notes_search_cancel),
         ],
         per_message=False,
     )

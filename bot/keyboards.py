@@ -1,5 +1,7 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+from canvas.client import is_submitted
+
 
 def main_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -53,13 +55,16 @@ def course_items_list(
 ) -> InlineKeyboardMarkup:
     buttons = []
     for a in assignments[:15]:
+        icon = "\u2705" if is_submitted(a) else "\u2b1c"
         buttons.append([InlineKeyboardButton(
-            f"[A] {a['name'][:37]}",
+            f"{icon} {a['name'][:36]}",
             callback_data=f"asgn_{course_id}_{a['id']}",
         )])
     for q in quizzes[:10]:
+        q_item = {**q, "_type": "quiz"}
+        icon = "\u2705" if is_submitted(q_item) else "\u2b1c"
         buttons.append([InlineKeyboardButton(
-            f"[Q] {q.get('title', 'Quiz')[:37]}",
+            f"{icon} {q.get('title', 'Quiz')[:36]}",
             callback_data=f"quiz_{course_id}_{q['id']}",
         )])
     buttons.append(
@@ -113,6 +118,37 @@ def folder_contents(subfolders: list[dict], course_id: int) -> InlineKeyboardMar
 def file_back(course_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("<< Back to Courses", callback_data="cmd_files")],
+    ])
+
+
+def notes_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Assignment Notes", callback_data="notes_filter_assignment"),
+            InlineKeyboardButton("General Notes", callback_data="notes_filter_general"),
+        ],
+        [
+            InlineKeyboardButton("Search Notes", callback_data="notes_search"),
+        ],
+        [InlineKeyboardButton("<< Back to Menu", callback_data="cmd_menu")],
+    ])
+
+
+def back_to_notes() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("<< Back to Notes", callback_data="cmd_notes")],
+        [InlineKeyboardButton("<< Back to Menu", callback_data="cmd_menu")],
+    ])
+
+
+def due_list(show_submitted: bool, days: int) -> InlineKeyboardMarkup:
+    if show_submitted:
+        toggle = InlineKeyboardButton("Hide Submitted", callback_data="due_hide_submitted")
+    else:
+        toggle = InlineKeyboardButton("Show Submitted", callback_data="due_show_submitted")
+    return InlineKeyboardMarkup([
+        [toggle],
+        [InlineKeyboardButton("<< Back to Menu", callback_data="cmd_menu")],
     ])
 
 

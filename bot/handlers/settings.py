@@ -10,6 +10,7 @@ from telegram.ext import (
 )
 
 from bot import keyboards
+from bot.utils import reply, reply_or_edit, send
 from canvas import client as canvas
 from db import models
 
@@ -20,7 +21,8 @@ WAITING_TOKEN = 0
 
 async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.effective_chat.type != "private":
-        await update.message.reply_text(
+        await reply(
+            update.message, context,
             "For security, /setup can only be used in a private chat with me."
         )
         return ConversationHandler.END
@@ -28,13 +30,15 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     telegram_id = update.effective_user.id
     existing_token = await models.get_canvas_token(telegram_id)
     if existing_token:
-        await update.message.reply_text(
+        await reply(
+            update.message, context,
             "You already have a Canvas account linked.\n"
             "Use /unlink to remove it first if you want to use a different token."
         )
         return ConversationHandler.END
 
-    await update.message.reply_text(
+    await reply(
+        update.message, context,
         "Let's link your Canvas account.\n\n"
         "To get your Canvas API token:\n"
         "1. Go to https://canvas.nus.edu.sg\n"
@@ -57,26 +61,33 @@ async def setup_receive_token(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.delete()
     except Exception:
         logger.warning("Could not delete token message for user %s", telegram_id)
+        await send(
+            update.effective_chat, context,
+            "I couldn't delete your token message. Please delete it manually for security."
+        )
 
     if not token or len(token) < 10:
-        await update.effective_chat.send_message(
+        await send(
+            update.effective_chat, context,
             "That doesn't look like a valid token. Please try /setup again."
         )
         return ConversationHandler.END
 
     # Validate the token by making a test API call
-    await update.effective_chat.send_message("Verifying your token...")
+    await send(update.effective_chat, context, "Verifying your token...")
     try:
         courses = await canvas.get_courses(token)
     except Exception:
         logger.warning("Token validation failed for user %s", telegram_id)
-        await update.effective_chat.send_message(
+        await send(
+            update.effective_chat, context,
             "That token doesn't seem to work. Please check it and try /setup again."
         )
         return ConversationHandler.END
 
     await models.upsert_user(telegram_id, token)
-    await update.effective_chat.send_message(
+    await send(
+        update.effective_chat, context,
         f"Canvas token verified and saved! Found {len(courses)} active course(s).\n\n"
         "Try /assignments or /due to see your assignments."
     )
@@ -84,7 +95,7 @@ async def setup_receive_token(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def setup_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text("Setup cancelled.")
+    await reply(update.message, context, "Setup cancelled.")
     return ConversationHandler.END
 
 
@@ -92,7 +103,7 @@ async def unlink_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     telegram_id = update.effective_user.id
     existing_token = await models.get_canvas_token(telegram_id)
     if not existing_token:
-        await update.message.reply_text("No Canvas account is linked.")
+        await reply(update.message, context, "No Canvas account is linked.")
         return
     keyboard = InlineKeyboardMarkup([
         [
@@ -100,7 +111,8 @@ async def unlink_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             InlineKeyboardButton("Cancel", callback_data="cmd_menu"),
         ]
     ])
-    await update.message.reply_text(
+    await reply(
+        update.message, context,
         "Are you sure? This will permanently delete:\n"
         "- Your Canvas token\n"
         "- All your assignment notes\n"
@@ -126,11 +138,12 @@ async def reminder_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     telegram_id = update.effective_user.id
     existing = await models.get_reminder_hour(telegram_id)
     if existing is None:
-        await update.message.reply_text("You need to /setup first.")
+        await reply(update.message, context, "You need to /setup first.")
         return
 
     if not context.args:
-        await update.message.reply_text(
+        await reply(
+            update.message, context,
             f"Your daily reminder is set to {existing}:00 SGT.\n\n"
             "To change it, use /reminder <hour> (0-23).\n"
             "Example: /reminder 8 for 8:00 AM SGT"
@@ -142,29 +155,48 @@ async def reminder_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if not 0 <= hour <= 23:
             raise ValueError
     except ValueError:
-        await update.message.reply_text("Please provide a valid hour (0-23). Example: /reminder 8")
+        await reply(update.message, context, "Please provide a valid hour (0-23). Example: /reminder 8")
         return
 
     await models.set_reminder_hour(telegram_id, hour)
-    await update.message.reply_text(f"Reminder time updated to {hour}:00 SGT.")
+    await reply(update.message, context, f"Reminder time updated to {hour}:00 SGT.")
+
+
+async def refresh_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    telegram_id = update.effective_user.id
+    token = await models.get_canvas_token(telegram_id)
+    if not token:
+        await reply(update.message, context, "You need to /setup first.")
+        return
+    canvas.clear_course_cache(token)
+    await reply(update.message, context, "Course cache cleared. Your next request will fetch fresh data from Canvas.")
 
 
 async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-    registered = await models.is_registered(update.effective_user.id)
+    telegram_id = update.effective_user.id
+    registered = await models.is_registered(telegram_id)
+
     if registered:
-        await query.edit_message_text(
-            "Your Canvas account is linked.\n"
-            "Run /unlink to remove it.",
-            reply_markup=keyboards.back_to_menu(),
+        reminder_hour = await models.get_reminder_hour(telegram_id)
+        reminder_str = f"{reminder_hour}:00 SGT" if reminder_hour is not None else "Not set"
+        text = (
+            "⚙️ Settings\n\n"
+            f"Canvas account: Linked\n"
+            f"Daily reminder: {reminder_str}\n\n"
+            "/unlink — Remove your Canvas account\n"
+            "/reminder <hour> — Change reminder time (0-23)\n"
+            "/refresh — Refresh cached course data"
         )
     else:
-        await query.edit_message_text(
-            "No Canvas account linked yet.\n"
-            "Run /setup to get started.",
-            reply_markup=keyboards.back_to_menu(),
+        text = (
+            "⚙️ Settings\n\n"
+            "Canvas account: Not linked\n\n"
+            "/setup — Link your Canvas account"
         )
+
+    await reply_or_edit(query, context, text, reply_markup=keyboards.back_to_menu())
 
 
 def get_setup_handler() -> ConversationHandler:

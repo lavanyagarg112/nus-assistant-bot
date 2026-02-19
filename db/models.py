@@ -210,6 +210,35 @@ async def delete_todo(todo_id: int, telegram_id: int) -> bool:
     return cursor.rowcount > 0
 
 
+async def search_notes(telegram_id: int, query: str) -> tuple[list[dict], list[dict]]:
+    """Search assignment notes and general notes by keyword. Returns (assignment_notes, general_notes)."""
+    db = await get_db()
+    escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    like_pattern = f"%{escaped}%"
+    a_rows = await db.execute_fetchall(
+        """
+        SELECT canvas_assignment_id, canvas_course_id, note_text, updated_at
+        FROM notes WHERE telegram_id = ? AND note_text LIKE ? ESCAPE '\\'
+        ORDER BY updated_at DESC
+        """,
+        (telegram_id, like_pattern),
+    )
+    assignment_notes = [
+        {"canvas_assignment_id": r[0], "canvas_course_id": r[1], "note_text": r[2], "updated_at": r[3]}
+        for r in a_rows
+    ]
+    g_rows = await db.execute_fetchall(
+        """
+        SELECT id, content, created_at
+        FROM general_notes WHERE telegram_id = ? AND content LIKE ? ESCAPE '\\'
+        ORDER BY created_at DESC
+        """,
+        (telegram_id, like_pattern),
+    )
+    general_notes = [{"id": r[0], "content": r[1], "created_at": r[2]} for r in g_rows]
+    return assignment_notes, general_notes
+
+
 async def delete_note(telegram_id: int, canvas_assignment_id: int) -> bool:
     db = await get_db()
     cursor = await db.execute(

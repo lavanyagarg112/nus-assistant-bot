@@ -1,26 +1,33 @@
 import logging
 from datetime import datetime, timezone
 
-from telegram import Update
+from telegram import InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from bot import keyboards
+from bot.utils import breadcrumb, reply, reply_or_edit
 from canvas import client as canvas
 from db import models
 
 logger = logging.getLogger(__name__)
 
 
-async def _require_token(update: Update) -> str | None:
+async def _require_token(update: Update, context: ContextTypes.DEFAULT_TYPE = None) -> str | None:
     """Get the user's Canvas token, or send an error message."""
     user_id = update.effective_user.id
     token = await models.get_canvas_token(user_id)
     if not token:
         text = "You haven't linked your Canvas account yet.\nRun /setup first."
         if update.callback_query:
-            await update.callback_query.edit_message_text(text)
+            if context:
+                await reply_or_edit(update.callback_query, context, text, reply_markup=keyboards.back_to_menu())
+            else:
+                await update.callback_query.edit_message_text(text, reply_markup=keyboards.back_to_menu())
         else:
-            await update.message.reply_text(text)
+            if context:
+                await reply(update.message, context, text, reply_markup=keyboards.back_to_menu())
+            else:
+                await update.message.reply_text(text, reply_markup=keyboards.back_to_menu())
     return token
 
 
@@ -34,7 +41,10 @@ def _format_due(due_str: str | None) -> str:
     if days < 0:
         return f"OVERDUE ({dt.strftime('%d %b %H:%M')})"
     if days == 0:
-        hours = int(diff.total_seconds() // 3600)
+        total_mins = int(diff.total_seconds() // 60)
+        if total_mins < 60:
+            return f"Due in {total_mins}m ({dt.strftime('%H:%M')})"
+        hours = total_mins // 60
         return f"Due in {hours}h ({dt.strftime('%H:%M')})"
     return f"Due in {days}d ({dt.strftime('%d %b %H:%M')})"
 
@@ -43,11 +53,11 @@ def _format_due(due_str: str | None) -> str:
 
 
 async def assignments_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    token = await _require_token(update)
+    token = await _require_token(update, context)
     if not token:
         return
     msg = update.message
-    loading = await msg.reply_text("Loading courses...")
+    loading = await reply(msg, context, "Loading courses...")
     try:
         courses = await canvas.get_courses(token)
     except Exception:
@@ -68,22 +78,22 @@ async def assignments_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     """Handle the cmd_assignments callback from menu."""
     query = update.callback_query
     await query.answer()
-    token = await _require_token(update)
+    token = await _require_token(update, context)
     if not token:
         return
     try:
         courses = await canvas.get_courses(token)
     except Exception:
         logger.error("Canvas API error fetching courses for user %s", update.effective_user.id)
-        await query.edit_message_text("Failed to fetch courses.")
+        await reply_or_edit(query, context, "Failed to fetch courses.")
         return
 
     if not courses:
-        await query.edit_message_text("No active courses found.")
+        await reply_or_edit(query, context, "No active courses found.")
         return
 
-    await query.edit_message_text(
-        "Select a course:", reply_markup=keyboards.course_list(courses)
+    await reply_or_edit(
+        query, context, "Select a course:", reply_markup=keyboards.course_list(courses)
     )
 
 
@@ -93,12 +103,16 @@ async def assignments_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 async def course_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-    token = await _require_token(update)
+    token = await _require_token(update, context)
     if not token:
         return
 
     course_id = int(query.data.split("_")[1])
+
     await query.edit_message_text("Loading assignments and quizzes...")
+
+    course_name = await _course_name(token, course_id)
+
     try:
         assignments = await canvas.get_assignments(token, course_id)
     except Exception:
@@ -112,17 +126,31 @@ async def course_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     except Exception:
         logger.debug("Could not fetch quizzes for course %s", course_id)
 
+    path = breadcrumb("Assignments", course_name) if course_name else "Assignments"
+
     if not assignments and not quizzes:
         await query.edit_message_text(
-            "No assignments or quizzes found for this course.",
+            f"{path}\n\nNo assignments or quizzes found for this course.",
             reply_markup=keyboards.back_to_menu(),
         )
         return
 
     await query.edit_message_text(
-        "Select an item:",
+        f"{path}\n\nSelect an item:",
         reply_markup=keyboards.course_items_list(assignments, quizzes, course_id),
     )
+
+
+async def _course_name(token: str, course_id: int) -> str | None:
+    """Look up a course name from the cached course list."""
+    try:
+        courses = await canvas.get_courses(token)
+        for c in courses:
+            if c["id"] == course_id:
+                return c["name"]
+    except Exception:
+        pass
+    return None
 
 
 # ── Assignment detail callback ──
@@ -133,7 +161,7 @@ async def assignment_detail_callback(
 ) -> None:
     query = update.callback_query
     await query.answer()
-    token = await _require_token(update)
+    token = await _require_token(update, context)
     if not token:
         return
 
@@ -156,14 +184,24 @@ async def assignment_detail_callback(
     note = await models.get_note(user_id, assignment_id)
     has_note = note is not None
 
+    course_name = await _course_name(token, course_id)
+    asgn_name = assignment['name']
     due = _format_due(assignment.get("due_at"))
     points = assignment.get("points_possible", "N/A")
+    status = canvas.submission_status_text(assignment)
     link = canvas.assignment_url(course_id, assignment_id)
 
+    parts = ["Assignments"]
+    if course_name:
+        parts.append(course_name)
+    parts.append(asgn_name)
+    path = _escape_md(breadcrumb(*parts))
+
     text = (
-        f"*{_escape_md(assignment['name'])}*\n\n"
+        f"{path}\n\n"
         f"Due: {_escape_md(due)}\n"
         f"Points: {_escape_md(str(points))}\n"
+        f"Status: {_escape_md(status)}\n"
         f"[Open in Canvas]({_escape_url(link)})\n"
     )
     if note:
@@ -184,7 +222,7 @@ async def quiz_detail_callback(
 ) -> None:
     query = update.callback_query
     await query.answer()
-    token = await _require_token(update)
+    token = await _require_token(update, context)
     if not token:
         return
 
@@ -203,17 +241,36 @@ async def quiz_detail_callback(
         await query.edit_message_text("Quiz not found.")
         return
 
+    course_name = await _course_name(token, course_id)
+    quiz_name = quiz.get('title', 'Untitled Quiz')
     due = _format_due(quiz.get("due_at"))
     points = quiz.get("points_possible", "N/A")
     time_limit = quiz.get("time_limit")
     time_str = f"{time_limit} min" if time_limit else "No time limit"
     link = canvas.quiz_url(course_id, quiz_id)
 
+    # Fetch quiz submission status
+    try:
+        quiz_sub = await canvas.get_quiz_submission(token, course_id, quiz_id)
+        submitted = quiz_sub and quiz_sub.get("workflow_state") in ("complete", "pending_review")
+    except Exception:
+        submitted = False
+    quiz["_type"] = "quiz"
+    quiz["_submitted"] = submitted
+    status = canvas.submission_status_text(quiz)
+
+    parts = ["Assignments"]
+    if course_name:
+        parts.append(course_name)
+    parts.append(quiz_name)
+    path = _escape_md(breadcrumb(*parts))
+
     text = (
-        f"*{_escape_md(quiz.get('title', 'Untitled Quiz'))}*\n\n"
+        f"{path}\n\n"
         f"Due: {_escape_md(due)}\n"
         f"Points: {_escape_md(str(points))}\n"
         f"Time limit: {_escape_md(time_str)}\n"
+        f"Status: {_escape_md(status)}\n"
         f"[Open in Canvas]({_escape_url(link)})\n"
     )
 
@@ -227,25 +284,56 @@ async def quiz_detail_callback(
 # ── /due command ──
 
 
-async def _fetch_and_format_due(token: str, days: int) -> str | None:
-    """Fetch upcoming assignments and return MarkdownV2 text, or None if empty."""
+async def _fetch_and_format_due(
+    token: str, days: int, show_submitted: bool = False
+) -> tuple[str | None, InlineKeyboardMarkup]:
+    """Fetch upcoming assignments and return (MarkdownV2 text, keyboard).
+
+    Returns (None, keyboard) if no items at all.
+    """
     upcoming = await canvas.get_upcoming_assignments(token, days=days)
+    markup = keyboards.due_list(show_submitted, days)
+
     if not upcoming:
-        return None
+        return None, markup
+
+    pending = [a for a in upcoming if not canvas.is_submitted(a)]
+    submitted = [a for a in upcoming if canvas.is_submitted(a)]
 
     lines = [f"*Upcoming Deadlines \\({_escape_md(str(days))} days\\)*\n"]
-    for a in upcoming:
-        due = _format_due(a.get("due_at"))
-        course = a.get("_course_name", "Unknown")
-        course_id = a.get("_course_id", 0)
-        item_type = a.get("_type", "assignment")
-        if item_type == "quiz":
-            link = canvas.quiz_url(course_id, a["id"])
-        else:
-            link = canvas.assignment_url(course_id, a["id"])
-        lines.append(f"\\- [{_escape_md(a['name'])}]({_escape_url(link)})")
-        lines.append(f"  {_escape_md(course)} \\| {_escape_md(due)}\n")
-    return _truncate_message("\n".join(lines))
+
+    if pending:
+        for a in pending:
+            due = _format_due(a.get("due_at"))
+            course = a.get("_course_name", "Unknown")
+            course_id = a.get("_course_id", 0)
+            item_type = a.get("_type", "assignment")
+            if item_type == "quiz":
+                link = canvas.quiz_url(course_id, a["id"])
+            else:
+                link = canvas.assignment_url(course_id, a["id"])
+            lines.append(f"\\- [{_escape_md(a['name'])}]({_escape_url(link)})")
+            lines.append(f"  {_escape_md(course)} \\| {_escape_md(due)}\n")
+    else:
+        lines.append("_All items have been submitted\\!_\n")
+
+    if show_submitted and submitted:
+        lines.append(f"\n*Submitted*\n")
+        for a in submitted:
+            due = _format_due(a.get("due_at"))
+            course = a.get("_course_name", "Unknown")
+            course_id = a.get("_course_id", 0)
+            item_type = a.get("_type", "assignment")
+            if item_type == "quiz":
+                link = canvas.quiz_url(course_id, a["id"])
+            else:
+                link = canvas.assignment_url(course_id, a["id"])
+            lines.append(f"\\- \u2705 [{_escape_md(a['name'])}]({_escape_url(link)})")
+            lines.append(f"  {_escape_md(course)} \\| {_escape_md(due)}\n")
+    elif submitted:
+        lines.append(f"_{_escape_md(str(len(submitted)))} submitted item\\(s\\) hidden_")
+
+    return _truncate_message("\n".join(lines)), markup
 
 
 def _parse_days(args: list[str]) -> int:
@@ -260,15 +348,15 @@ def _parse_days(args: list[str]) -> int:
 
 
 async def due_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    token = await _require_token(update)
+    token = await _require_token(update, context)
     if not token:
         return
 
     days = _parse_days(context.args)
     msg = update.message
-    loading = await msg.reply_text("Loading upcoming deadlines...")
+    loading = await reply(msg, context, "Loading upcoming deadlines...")
     try:
-        text = await _fetch_and_format_due(token, days)
+        text, markup = await _fetch_and_format_due(token, days)
     except Exception:
         logger.error("Canvas API error fetching deadlines for user %s", update.effective_user.id)
         await loading.edit_text("Failed to fetch assignments.")
@@ -277,28 +365,60 @@ async def due_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not text:
         await loading.edit_text(
             f"No assignments due in the next {days} days!",
-            reply_markup=keyboards.back_to_menu(),
+            reply_markup=markup,
         )
         return
 
     await loading.edit_text(
         text,
         parse_mode="MarkdownV2",
-        reply_markup=keyboards.back_to_menu(),
+        reply_markup=markup,
     )
 
 
 async def due_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-    token = await _require_token(update)
+    token = await _require_token(update, context)
     if not token:
         return
 
     days = 7
-    await query.edit_message_text("Loading upcoming deadlines...")
+    loading = await reply_or_edit(query, context, "Loading upcoming deadlines...")
     try:
-        text = await _fetch_and_format_due(token, days)
+        text, markup = await _fetch_and_format_due(token, days)
+    except Exception:
+        logger.error("Canvas API error fetching deadlines for user %s", update.effective_user.id)
+        await loading.edit_text("Failed to fetch assignments.")
+        return
+
+    if not text:
+        await loading.edit_text(
+            f"No assignments due in the next {days} days!",
+            reply_markup=markup,
+        )
+        return
+
+    await loading.edit_text(
+        text,
+        parse_mode="MarkdownV2",
+        reply_markup=markup,
+    )
+
+
+async def due_toggle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle Show/Hide Submitted toggle on the due view."""
+    query = update.callback_query
+    await query.answer()
+    token = await _require_token(update, context)
+    if not token:
+        return
+
+    show_submitted = query.data == "due_show_submitted"
+    days = 7
+
+    try:
+        text, markup = await _fetch_and_format_due(token, days, show_submitted=show_submitted)
     except Exception:
         logger.error("Canvas API error fetching deadlines for user %s", update.effective_user.id)
         await query.edit_message_text("Failed to fetch assignments.")
@@ -307,14 +427,14 @@ async def due_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not text:
         await query.edit_message_text(
             f"No assignments due in the next {days} days!",
-            reply_markup=keyboards.back_to_menu(),
+            reply_markup=markup,
         )
         return
 
     await query.edit_message_text(
         text,
         parse_mode="MarkdownV2",
-        reply_markup=keyboards.back_to_menu(),
+        reply_markup=markup,
     )
 
 

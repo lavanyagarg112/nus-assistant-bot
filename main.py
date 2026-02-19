@@ -82,9 +82,12 @@ async def hourly_reminder(context) -> None:
                 lines.append(f"- {tag}{a['name']} ({course})")
                 lines.append(f"  Due: {due_dt.strftime('%d %b %H:%M')}\n")
 
-            await context.bot.send_message(
+            msg = await context.bot.send_message(
                 chat_id=telegram_id, text="\n".join(lines)
             )
+            # Track as latest bot message for edit-or-reply logic
+            chat_data = context.application.chat_data.setdefault(telegram_id, {})
+            chat_data["_last_bot_msg_id"] = msg.message_id
         except Exception as e:
             logger.error("Reminder failed for user %s: %s", telegram_id, e)
 
@@ -101,6 +104,7 @@ def main() -> None:
     # ConversationHandlers (must be added before generic callback handlers)
     app.add_handler(settings.get_setup_handler())
     app.add_handler(notes.get_quicknote_handler())
+    app.add_handler(notes.get_search_handler())
     app.add_handler(notes.get_note_handler())
     app.add_handler(todos.get_add_todo_handler())
 
@@ -117,6 +121,7 @@ def main() -> None:
     app.add_handler(CommandHandler("reminder", settings.reminder_cmd))
     app.add_handler(CommandHandler("todos", todos.todos_cmd))
     app.add_handler(CommandHandler("add_todo", todos.add_todo_cmd))
+    app.add_handler(CommandHandler("refresh", settings.refresh_cmd))
 
     # Callback query handlers
     app.add_handler(CallbackQueryHandler(start.menu_callback, pattern="^cmd_menu$"))
@@ -130,11 +135,14 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(files.folder_callback, pattern=r"^folder_\d+_\d+$"))
     app.add_handler(CallbackQueryHandler(settings.unlink_confirm_callback, pattern="^unlink_confirm$"))
     app.add_handler(CallbackQueryHandler(todos.todos_callback, pattern="^cmd_todos$"))
+    app.add_handler(CallbackQueryHandler(todos.todos_show_all_callback, pattern=r"^todos_(all|active)$"))
     app.add_handler(CallbackQueryHandler(todos.todo_toggle_callback, pattern=r"^todotoggle_\d+$"))
     app.add_handler(CallbackQueryHandler(todos.todo_delete_callback, pattern=r"^tododel_\d+$"))
+    app.add_handler(CallbackQueryHandler(assignments.due_toggle_callback, pattern=r"^due_(show|hide)_submitted$"))
     app.add_handler(CallbackQueryHandler(assignments.course_callback, pattern=r"^course_\d+$"))
     app.add_handler(CallbackQueryHandler(assignments.assignment_detail_callback, pattern=r"^asgn_\d+_\d+$"))
     app.add_handler(CallbackQueryHandler(assignments.quiz_detail_callback, pattern=r"^quiz_\d+_\d+$"))
+    app.add_handler(CallbackQueryHandler(notes.notes_filter_callback, pattern=r"^notes_filter_(assignment|general)$"))
     app.add_handler(CallbackQueryHandler(notes.note_delete, pattern=r"^note_del_\d+_\d+$"))
 
     # Fallback: unknown messages

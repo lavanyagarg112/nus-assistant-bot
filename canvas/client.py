@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 from datetime import datetime, timezone
 
@@ -11,6 +12,13 @@ logger = logging.getLogger(__name__)
 CANVAS_API = f"{config.CANVAS_BASE_URL}/api/v1"
 PER_PAGE = 50
 MAX_PAGES = 20
+
+# In-memory course cache: token_sha256 -> courses (permanent until /refresh)
+_course_cache: dict[str, list[dict]] = {}
+
+
+def _cache_key(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
 async def _get_paginated(
@@ -58,8 +66,18 @@ def _auth_headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+def clear_course_cache(token: str) -> None:
+    """Remove cached courses for the given token."""
+    _course_cache.pop(_cache_key(token), None)
+
+
 async def get_courses(token: str) -> list[dict]:
-    """Return active courses the user is enrolled in."""
+    """Return active courses the user is enrolled in (cached until /refresh)."""
+    cache_key = _cache_key(token)
+    cached = _course_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     async with httpx.AsyncClient(timeout=30) as client:
         courses = await _get_paginated(
             client,
@@ -72,10 +90,12 @@ async def get_courses(token: str) -> list[dict]:
             },
         )
     # Filter to student enrollments and sort by name
-    return sorted(
+    result = sorted(
         [c for c in courses if c.get("name")],
         key=lambda c: c.get("name", ""),
     )
+    _course_cache[cache_key] = result
+    return result
 
 
 async def get_assignments(token: str, course_id: int) -> list[dict]:
@@ -85,7 +105,7 @@ async def get_assignments(token: str, course_id: int) -> list[dict]:
             client,
             f"{CANVAS_API}/courses/{course_id}/assignments",
             _auth_headers(token),
-            {"order_by": "due_at"},
+            {"order_by": "due_at", "include[]": "submission"},
         )
     # Sort: assignments with due dates first, then those without
     return sorted(
@@ -107,7 +127,7 @@ async def get_upcoming_assignments(token: str, days: int = 7) -> list[dict]:
                 client,
                 f"{CANVAS_API}/courses/{course['id']}/assignments",
                 _auth_headers(token),
-                {"order_by": "due_at"},
+                {"order_by": "due_at", "include[]": "submission"},
             )
             for a in assignments:
                 due = a.get("due_at")
@@ -129,7 +149,7 @@ async def get_upcoming_assignments(token: str, days: int = 7) -> list[dict]:
                     f"{CANVAS_API}/courses/{course['id']}/quizzes",
                     _auth_headers(token),
                 )
-                for q in quizzes:
+                for q in quizzes[:10]:
                     due = q.get("due_at")
                     if not due:
                         continue
@@ -141,6 +161,9 @@ async def get_upcoming_assignments(token: str, days: int = 7) -> list[dict]:
                         q["_course_id"] = course["id"]
                         q["_due_dt"] = due_dt
                         q["_type"] = "quiz"
+                        q["_submitted"] = await _check_quiz_submitted(
+                            client, token, course["id"], q["id"]
+                        )
                         upcoming.append(q)
             except Exception:
                 logger.debug("Could not fetch quizzes for course %s", course["id"])
@@ -149,13 +172,18 @@ async def get_upcoming_assignments(token: str, days: int = 7) -> list[dict]:
 
 
 async def get_quizzes(token: str, course_id: int) -> list[dict]:
-    """Return quizzes for a course, sorted by due date."""
+    """Return quizzes for a course with submission status, sorted by due date."""
     async with httpx.AsyncClient(timeout=30) as client:
         quizzes = await _get_paginated(
             client,
             f"{CANVAS_API}/courses/{course_id}/quizzes",
             _auth_headers(token),
         )
+        for q in quizzes[:10]:
+            q["_type"] = "quiz"
+            q["_submitted"] = await _check_quiz_submitted(
+                client, token, course_id, q["id"]
+            )
     return sorted(
         quizzes,
         key=lambda q: (q.get("due_at") is None, q.get("due_at") or ""),
@@ -173,6 +201,75 @@ async def get_quiz(token: str, course_id: int, quiz_id: int) -> dict | None:
             return None
         resp.raise_for_status()
         return resp.json()
+
+
+async def get_quiz_submission(token: str, course_id: int, quiz_id: int) -> dict | None:
+    """Return the current user's quiz submission, or None."""
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(
+            f"{CANVAS_API}/courses/{course_id}/quizzes/{quiz_id}/submissions",
+            headers=_auth_headers(token),
+        )
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        data = resp.json()
+        subs = data.get("quiz_submissions", [])
+        return subs[0] if subs else None
+
+
+async def _check_quiz_submitted(
+    client: httpx.AsyncClient, token: str, course_id: int, quiz_id: int
+) -> bool:
+    """Check if the user has completed a quiz."""
+    try:
+        resp = await client.get(
+            f"{CANVAS_API}/courses/{course_id}/quizzes/{quiz_id}/submissions",
+            headers=_auth_headers(token),
+        )
+        if resp.status_code == 404:
+            return False
+        resp.raise_for_status()
+        data = resp.json()
+        subs = data.get("quiz_submissions", [])
+        if subs:
+            state = subs[0].get("workflow_state", "")
+            return state in ("complete", "pending_review")
+    except Exception:
+        logger.debug("Could not fetch quiz submission for quiz %s", quiz_id)
+    return False
+
+
+def is_submitted(item: dict) -> bool:
+    """Check if an assignment or quiz has been submitted."""
+    if item.get("_type") == "quiz":
+        return bool(item.get("_submitted"))
+    # For assignments, check submission.workflow_state
+    sub = item.get("submission", {})
+    if not sub:
+        return False
+    state = sub.get("workflow_state", "unsubmitted")
+    return state in ("submitted", "graded", "pending_review")
+
+
+def submission_status_text(item: dict) -> str:
+    """Return a human-readable submission status string."""
+    if item.get("_type") == "quiz":
+        return "Complete" if item.get("_submitted") else "Not taken"
+    sub = item.get("submission", {})
+    if not sub:
+        return "Not submitted"
+    state = sub.get("workflow_state", "unsubmitted")
+    if state == "graded":
+        score = sub.get("score")
+        if score is not None:
+            return f"Graded ({score} pts)"
+        return "Graded"
+    if state == "submitted":
+        return "Submitted"
+    if state == "pending_review":
+        return "Pending review"
+    return "Not submitted"
 
 
 def assignment_url(course_id: int, assignment_id: int) -> str:
@@ -221,11 +318,12 @@ async def get_folder_files(token: str, folder_id: int) -> list[dict]:
 
 
 async def get_assignment(token: str, course_id: int, assignment_id: int) -> dict | None:
-    """Return a single assignment."""
+    """Return a single assignment with submission data."""
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.get(
             f"{CANVAS_API}/courses/{course_id}/assignments/{assignment_id}",
             headers=_auth_headers(token),
+            params={"include[]": "submission"},
         )
         if resp.status_code == 404:
             return None
