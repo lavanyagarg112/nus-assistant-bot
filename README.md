@@ -12,13 +12,14 @@ You'll need a **Canvas API token** — generate one from [Canvas](https://canvas
 
 | Command | Description |
 |---------|-------------|
-| `/assignments` | Browse assignments and quizzes by course |
-| `/due [days]` | View upcoming deadlines (default 7 days) |
+| `/assignments` | Browse assignments and quizzes by course, with submission status icons |
+| `/due [days]` | View upcoming deadlines split by pending and submitted (default 7 days) |
 | `/files` | Browse and open course files |
-| `/notes` | View your personal notes |
+| `/notes` | View, filter, and search your personal notes |
 | `/start_notes` | Capture freeform notes |
 | `/todos` | Manage personal to-dos per course |
 | `/reminder [hour]` | Set a daily deadline reminder (SGT) |
+| `/refresh` | Force a fresh fetch of your course list from Canvas |
 | `/help` | Full command list |
 
 ---
@@ -82,7 +83,7 @@ The bot will initialise the SQLite database on first run and start polling for m
 │   ├── keyboards.py         # Inline keyboard builders
 │   └── handlers/
 │       ├── start.py         # /start, /help, /menu, /cancel
-│       ├── settings.py      # /setup, /unlink, /reminder
+│       ├── settings.py      # /setup, /unlink, /reminder, /refresh
 │       ├── assignments.py   # /assignments, /due, assignment/quiz detail
 │       ├── notes.py         # /notes, /start_notes, /end_notes
 │       ├── files.py         # /files, folder browsing
@@ -101,3 +102,4 @@ The bot will initialise the SQLite database on first run and start polling for m
 - **Database** — SQLite with WAL mode, stored as `bot.db` by default
 - **Token storage** — Canvas API tokens are encrypted at rest using Fernet
 - **Reminders** — Users set their preferred hour (SGT) via `/reminder` and get a daily push with deadlines due in the next 48 hours
+- **Course cache** — Course list is cached in memory per user and persists until `/refresh` is run, reducing redundant API calls
