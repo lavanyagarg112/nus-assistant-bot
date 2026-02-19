@@ -142,11 +142,12 @@ async def note_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     existing = await models.get_note(update.effective_user.id, assignment_id)
     if existing:
-        await query.edit_message_text(
+        await reply_or_edit(
+            query, context,
             f"Current note: {existing}\n\nType your new note (or /cancel to keep the current one):"
         )
     else:
-        await query.edit_message_text("Type your note for this assignment (or /cancel):")
+        await reply_or_edit(query, context, "Type your note for this assignment (or /cancel):")
 
     return WAITING_NOTE
 
@@ -203,9 +204,9 @@ async def note_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     deleted = await models.delete_note(update.effective_user.id, assignment_id)
     if deleted:
-        await query.edit_message_text("Note deleted.", reply_markup=keyboards.back_to_menu())
+        await reply_or_edit(query, context, "Note deleted.", reply_markup=keyboards.back_to_menu())
     else:
-        await query.edit_message_text("No note found.", reply_markup=keyboards.back_to_menu())
+        await reply_or_edit(query, context, "No note found.", reply_markup=keyboards.back_to_menu())
 
 
 # ── Filter notes by type ──
@@ -225,7 +226,8 @@ async def notes_filter_callback(update: Update, context: ContextTypes.DEFAULT_TY
     if filter_type == "assignment":
         assignment_notes = await models.get_all_notes(user_id)
         if not assignment_notes:
-            await query.edit_message_text(
+            await reply_or_edit(
+                query, context,
                 "No assignment notes yet.\nBrowse /assignments to add notes.",
                 reply_markup=keyboards.back_to_notes(),
             )
@@ -234,14 +236,16 @@ async def notes_filter_callback(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         general_notes = await models.get_all_general_notes(user_id)
         if not general_notes:
-            await query.edit_message_text(
+            await reply_or_edit(
+                query, context,
                 "No general notes yet.\nUse /start_notes for freeform capture.",
                 reply_markup=keyboards.back_to_notes(),
             )
             return
         lines = await _format_notes(token, [], general_notes)
 
-    await query.edit_message_text(
+    await reply_or_edit(
+        query, context,
         "\n".join(lines),
         parse_mode="MarkdownV2",
         reply_markup=keyboards.back_to_notes(),
@@ -254,7 +258,7 @@ async def notes_filter_callback(update: Update, context: ContextTypes.DEFAULT_TY
 async def notes_search_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("Type your search query (or /cancel):")
+    await reply_or_edit(query, context, "Type your search query (or /cancel):")
     return WAITING_SEARCH_QUERY
 
 

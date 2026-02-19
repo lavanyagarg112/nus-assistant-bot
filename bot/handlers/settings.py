@@ -128,7 +128,8 @@ async def unlink_confirm_callback(update: Update, context: ContextTypes.DEFAULT_
     await query.answer()
     telegram_id = update.effective_user.id
     await models.delete_user(telegram_id)
-    await query.edit_message_text(
+    await reply_or_edit(
+        query, context,
         "All your data has been deleted.\n"
         "Run /setup to link a new Canvas account."
     )

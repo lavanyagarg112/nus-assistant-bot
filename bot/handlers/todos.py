@@ -237,7 +237,7 @@ async def add_todo_course_callback(update: Update, context: ContextTypes.DEFAULT
                     course_label = btn.text
                     break
 
-    await query.edit_message_text(f"Course: {course_label}\n\nType your todo text (or /cancel):")
+    await reply_or_edit(query, context, f"Course: {course_label}\n\nType your todo text (or /cancel):")
     return WAITING_TODO_TEXT
 
 
