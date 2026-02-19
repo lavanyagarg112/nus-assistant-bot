@@ -103,3 +103,9 @@ The bot will initialise the SQLite database on first run and start polling for m
 - **Token storage** — Canvas API tokens are encrypted at rest using Fernet
 - **Reminders** — Users set their preferred hour (SGT) via `/reminder` and get a daily push with deadlines due in the next 48 hours
 - **Course cache** — Course list is cached in memory per user and persists until `/refresh` is run, reducing redundant API calls
+
+---
+
+## Feature Requests & Feedback
+
+Have an idea or found something that could be better? Open an issue on [GitHub](https://github.com/lavanyagarg112/nus-assistant-bot/issues) — all suggestions welcome!
