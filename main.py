@@ -11,7 +11,7 @@ from telegram.ext import (
 )
 
 import config
-from bot.handlers import assignments, files, notes, settings, start, todos
+from bot.handlers import admin, assignments, files, notes, settings, start, todos
 from canvas import client as canvas
 from db import models
 from db.database import close_db, init_db
@@ -127,6 +127,7 @@ def main() -> None:
     app.add_handler(notes.get_search_handler())
     app.add_handler(notes.get_note_handler())
     app.add_handler(todos.get_add_todo_handler())
+    app.add_handler(admin.get_broadcast_handler())
 
     # Command handlers
     app.add_handler(CommandHandler("start", start.start))
@@ -142,6 +143,7 @@ def main() -> None:
     app.add_handler(CommandHandler("todos", todos.todos_cmd))
     app.add_handler(CommandHandler("add_todo", todos.add_todo_cmd))
     app.add_handler(CommandHandler("refresh", settings.refresh_cmd))
+    app.add_handler(CommandHandler("admin", admin.admin_cmd))
 
     # Callback query handlers
     app.add_handler(CallbackQueryHandler(start.menu_callback, pattern="^cmd_menu$"))

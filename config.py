@@ -9,6 +9,9 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 FERNET_KEY = os.environ["FERNET_KEY"]
 CANVAS_BASE_URL = os.getenv("CANVAS_BASE_URL", "https://canvas.nus.edu.sg").rstrip("/")
 DB_PATH = os.getenv("DB_PATH", "bot.db")
+_admin_id = os.getenv("ADMIN_TELEGRAM_ID")
+ADMIN_TELEGRAM_ID = int(_admin_id) if _admin_id else None
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
 
 # ── Startup validations ──
 

@@ -210,6 +210,38 @@ async def delete_todo(todo_id: int, telegram_id: int) -> bool:
     return cursor.rowcount > 0
 
 
+async def get_stats() -> dict:
+    """Return aggregate stats for admin dashboard."""
+    db = await get_db()
+    rows = await db.execute_fetchall("SELECT COUNT(*) FROM users")
+    user_count = rows[0][0]
+    rows = await db.execute_fetchall("SELECT COUNT(*) FROM notes")
+    note_count = rows[0][0]
+    rows = await db.execute_fetchall("SELECT COUNT(*) FROM general_notes")
+    general_note_count = rows[0][0]
+    rows = await db.execute_fetchall("SELECT COUNT(*) FROM todos")
+    todo_count = rows[0][0]
+    rows = await db.execute_fetchall("SELECT COUNT(*) FROM todos WHERE done = 1")
+    todo_done_count = rows[0][0]
+    rows = await db.execute_fetchall("SELECT COUNT(*) FROM users WHERE reminder_hour IS NOT NULL")
+    reminder_count = rows[0][0]
+    return {
+        "users": user_count,
+        "notes": note_count,
+        "general_notes": general_note_count,
+        "todos": todo_count,
+        "todos_done": todo_done_count,
+        "reminders_enabled": reminder_count,
+    }
+
+
+async def get_all_user_ids() -> list[int]:
+    """Return all registered user telegram_ids."""
+    db = await get_db()
+    rows = await db.execute_fetchall("SELECT telegram_id FROM users")
+    return [r[0] for r in rows]
+
+
 async def search_notes(telegram_id: int, query: str) -> tuple[list[dict], list[dict]]:
     """Search assignment notes and general notes by keyword. Returns (assignment_notes, general_notes)."""
     db = await get_db()
