@@ -5,7 +5,7 @@ from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, filters
 
 import config
-from bot.utils import fallback_command, reply
+from bot.utils import make_fallback_command, reply
 from db import models
 
 logger = logging.getLogger(__name__)
@@ -95,7 +95,7 @@ def get_broadcast_handler() -> ConversationHandler:
         },
         fallbacks=[
             CommandHandler("cancel", broadcast_cancel),
-            MessageHandler(filters.COMMAND, fallback_command),
+            MessageHandler(filters.COMMAND, make_fallback_command("broadcast")),
         ],
         per_message=False,
     )

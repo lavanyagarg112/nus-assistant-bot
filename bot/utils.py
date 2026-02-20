@@ -34,10 +34,17 @@ def breadcrumb(*parts: str) -> str:
     return " > ".join(parts)
 
 
-async def fallback_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Catch-all fallback for ConversationHandlers: cancel and tell user to retry."""
-    await reply(update.message, context, "Previous action cancelled. Please re-send your command.")
-    return ConversationHandler.END
+def make_fallback_command(action_name: str):
+    """Create a catch-all fallback handler for a ConversationHandler."""
+    async def fallback_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        cmd = update.message.text.split()[0] if update.message.text else "command"
+        await reply(
+            update.message, context,
+            f"/{action_name} was cancelled because you sent {cmd}.\n"
+            f"Send {cmd} again, or use /{action_name} to restart.",
+        )
+        return ConversationHandler.END
+    return fallback_command
 
 
 async def reply_or_edit(query, context: ContextTypes.DEFAULT_TYPE, text: str, **kwargs) -> Message:

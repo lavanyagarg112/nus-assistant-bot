@@ -13,7 +13,7 @@ from telegram.ext import (
 
 from bot import keyboards
 from bot.handlers.assignments import _escape_md, _require_token, _truncate_message
-from bot.utils import fallback_command, reply, reply_or_edit
+from bot.utils import make_fallback_command, reply, reply_or_edit
 from canvas import client as canvas
 from db import models
 
@@ -385,7 +385,7 @@ def get_quicknote_handler() -> ConversationHandler:
         fallbacks=[
             CommandHandler("end_notes", end_notes_cmd),
             CommandHandler("cancel", quicknote_cancel),
-            MessageHandler(filters.COMMAND, fallback_command),
+            MessageHandler(filters.COMMAND, make_fallback_command("start_notes")),
         ],
         per_message=False,
     )
@@ -403,7 +403,7 @@ def get_search_handler() -> ConversationHandler:
         },
         fallbacks=[
             CommandHandler("cancel", notes_search_cancel),
-            MessageHandler(filters.COMMAND, fallback_command),
+            MessageHandler(filters.COMMAND, make_fallback_command("search")),
         ],
         per_message=False,
     )
@@ -421,7 +421,7 @@ def get_note_handler() -> ConversationHandler:
         },
         fallbacks=[
             CommandHandler("cancel", note_cancel),
-            MessageHandler(filters.COMMAND, fallback_command),
+            MessageHandler(filters.COMMAND, make_fallback_command("add note")),
         ],
         per_message=False,
     )
