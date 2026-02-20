@@ -111,7 +111,10 @@ The bot will initialise the SQLite database on first run and start polling for m
 
 - **Database** — SQLite with WAL mode, stored as `bot.db` by default
 - **Token storage** — Canvas API tokens are encrypted at rest using Fernet
-- **Reminders** — Users set their preferred hour (SGT) via `/reminder` and get a daily push with deadlines due in the next 48 hours
+- **Token renewal** — If your Canvas token expires, every command will tell you to run `/setup` to add a new one. Running `/setup` again replaces only the token — all your notes, todos, and settings are kept
+- **Submission status** — Assignment submission detection uses `submission.attempt` to avoid false positives from instructor-graded items with no actual student submission
+- **Item type markers** — `[A]` = Assignment, `[Q]` = Quiz. Shown in course item lists, detail views, and the `/due` deadline list so you can tell them apart at a glance
+- **Reminders** — Users set their preferred hour (SGT) via `/reminder` and get a daily push with deadlines due in the next 48 hours. Expired tokens are detected and the user is notified
 - **Course cache** — Course list is cached in memory per user and persists until `/refresh` is run, reducing redundant API calls
 
 ---
