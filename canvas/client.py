@@ -118,57 +118,83 @@ async def get_upcoming_assignments(token: str, days: int = 7) -> list[dict]:
     """Return assignments and quizzes due within `days` across all courses."""
     courses = await get_courses(token)
     now = datetime.now(timezone.utc)
-    upcoming: list[dict] = []
 
     async with httpx.AsyncClient(timeout=30) as client:
-        for course in courses:
-            # Fetch assignments
-            assignments = await _get_paginated(
-                client,
-                f"{CANVAS_API}/courses/{course['id']}/assignments",
-                _auth_headers(token),
-                {"order_by": "due_at", "include[]": "submission"},
-            )
-            for a in assignments:
-                due = a.get("due_at")
-                if not due:
-                    continue
-                due_dt = datetime.fromisoformat(due.replace("Z", "+00:00"))
-                diff = (due_dt - now).total_seconds()
-                if 0 < diff <= days * 86400:
-                    a["_course_name"] = course.get("name", "Unknown")
-                    a["_course_id"] = course["id"]
-                    a["_due_dt"] = due_dt
-                    a["_type"] = "assignment"
-                    upcoming.append(a)
+        # Fetch all courses in parallel
+        results = await asyncio.gather(
+            *[_fetch_course_upcoming(client, token, course, now, days) for course in courses],
+            return_exceptions=True,
+        )
 
-            # Fetch quizzes
-            try:
-                quizzes = await _get_paginated(
-                    client,
-                    f"{CANVAS_API}/courses/{course['id']}/quizzes",
-                    _auth_headers(token),
-                )
-                for q in quizzes[:10]:
-                    due = q.get("due_at")
-                    if not due:
-                        continue
-                    due_dt = datetime.fromisoformat(due.replace("Z", "+00:00"))
-                    diff = (due_dt - now).total_seconds()
-                    if 0 < diff <= days * 86400:
-                        q["name"] = q.get("title", "Untitled Quiz")
-                        q["_course_name"] = course.get("name", "Unknown")
-                        q["_course_id"] = course["id"]
-                        q["_due_dt"] = due_dt
-                        q["_type"] = "quiz"
-                        q["_submitted"] = await _check_quiz_submitted(
-                            client, token, course["id"], q["id"]
-                        )
-                        upcoming.append(q)
-            except Exception:
-                logger.debug("Could not fetch quizzes for course %s", course["id"])
+    upcoming: list[dict] = []
+    for result in results:
+        if isinstance(result, list):
+            upcoming.extend(result)
 
     return sorted(upcoming, key=lambda a: a["_due_dt"])
+
+
+async def _fetch_course_upcoming(
+    client: httpx.AsyncClient, token: str, course: dict, now: datetime, days: int
+) -> list[dict]:
+    """Fetch upcoming assignments and quizzes for a single course."""
+    items: list[dict] = []
+
+    # Fetch assignments
+    assignments = await _get_paginated(
+        client,
+        f"{CANVAS_API}/courses/{course['id']}/assignments",
+        _auth_headers(token),
+        {"order_by": "due_at", "include[]": "submission"},
+    )
+    for a in assignments:
+        due = a.get("due_at")
+        if not due:
+            continue
+        due_dt = datetime.fromisoformat(due.replace("Z", "+00:00"))
+        diff = (due_dt - now).total_seconds()
+        if 0 < diff <= days * 86400:
+            a["_course_name"] = course.get("name", "Unknown")
+            a["_course_id"] = course["id"]
+            a["_due_dt"] = due_dt
+            a["_type"] = "assignment"
+            items.append(a)
+
+    # Fetch quizzes
+    try:
+        quizzes = await _get_paginated(
+            client,
+            f"{CANVAS_API}/courses/{course['id']}/quizzes",
+            _auth_headers(token),
+        )
+        # Filter to upcoming quizzes first, then check submissions in parallel
+        upcoming_quizzes: list[tuple[dict, datetime]] = []
+        for q in quizzes[:10]:
+            due = q.get("due_at")
+            if not due:
+                continue
+            due_dt = datetime.fromisoformat(due.replace("Z", "+00:00"))
+            diff = (due_dt - now).total_seconds()
+            if 0 < diff <= days * 86400:
+                upcoming_quizzes.append((q, due_dt))
+
+        if upcoming_quizzes:
+            sub_results = await asyncio.gather(
+                *[_check_quiz_submitted(client, token, course["id"], q["id"]) for q, _ in upcoming_quizzes],
+                return_exceptions=True,
+            )
+            for (q, due_dt), submitted in zip(upcoming_quizzes, sub_results):
+                q["name"] = q.get("title", "Untitled Quiz")
+                q["_course_name"] = course.get("name", "Unknown")
+                q["_course_id"] = course["id"]
+                q["_due_dt"] = due_dt
+                q["_type"] = "quiz"
+                q["_submitted"] = submitted if isinstance(submitted, bool) else False
+                items.append(q)
+    except Exception:
+        logger.debug("Could not fetch quizzes for course %s", course["id"])
+
+    return items
 
 
 async def get_quizzes(token: str, course_id: int) -> list[dict]:
@@ -179,11 +205,15 @@ async def get_quizzes(token: str, course_id: int) -> list[dict]:
             f"{CANVAS_API}/courses/{course_id}/quizzes",
             _auth_headers(token),
         )
-        for q in quizzes[:10]:
-            q["_type"] = "quiz"
-            q["_submitted"] = await _check_quiz_submitted(
-                client, token, course_id, q["id"]
+        check_quizzes = quizzes[:10]
+        if check_quizzes:
+            sub_results = await asyncio.gather(
+                *[_check_quiz_submitted(client, token, course_id, q["id"]) for q in check_quizzes],
+                return_exceptions=True,
             )
+            for q, submitted in zip(check_quizzes, sub_results):
+                q["_type"] = "quiz"
+                q["_submitted"] = submitted if isinstance(submitted, bool) else False
     return sorted(
         quizzes,
         key=lambda q: (q.get("due_at") is None, q.get("due_at") or ""),

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from telegram import Update
@@ -100,16 +101,21 @@ async def _format_notes(
     lines = ["*Your Notes*\n"]
 
     if assignment_notes:
-        lines.append("*Assignment Notes*")
-        for n in assignment_notes:
-            course_name = course_names.get(n["canvas_course_id"], "Unknown Course")
+        # Fetch all assignment names in parallel
+        async def _get_name(n: dict) -> str:
             try:
-                assignment = await canvas.get_assignment(
+                a = await canvas.get_assignment(
                     token, n["canvas_course_id"], n["canvas_assignment_id"]
                 )
-                name = assignment["name"] if assignment else f"Assignment #{n['canvas_assignment_id']}"
+                return a["name"] if a else f"Assignment #{n['canvas_assignment_id']}"
             except Exception:
-                name = f"Assignment #{n['canvas_assignment_id']}"
+                return f"Assignment #{n['canvas_assignment_id']}"
+
+        names = await asyncio.gather(*[_get_name(n) for n in assignment_notes])
+
+        lines.append("*Assignment Notes*")
+        for n, name in zip(assignment_notes, names):
+            course_name = course_names.get(n["canvas_course_id"], "Unknown Course")
             lines.append(f"*{_escape_md(name)}*")
             lines.append(f"  _{_escape_md(course_name)}_")
             lines.append(f"  {_escape_md(n['note_text'])}\n")

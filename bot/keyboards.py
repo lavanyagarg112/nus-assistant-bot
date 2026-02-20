@@ -143,9 +143,9 @@ def back_to_notes() -> InlineKeyboardMarkup:
 
 def due_list(show_submitted: bool, days: int) -> InlineKeyboardMarkup:
     if show_submitted:
-        toggle = InlineKeyboardButton("Hide Submitted", callback_data="due_hide_submitted")
+        toggle = InlineKeyboardButton("Hide Submitted", callback_data=f"due_hide_submitted_{days}")
     else:
-        toggle = InlineKeyboardButton("Show Submitted", callback_data="due_show_submitted")
+        toggle = InlineKeyboardButton("Show Submitted", callback_data=f"due_show_submitted_{days}")
     return InlineKeyboardMarkup([
         [toggle],
         [InlineKeyboardButton("<< Back to Menu", callback_data="cmd_menu")],

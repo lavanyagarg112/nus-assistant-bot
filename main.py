@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, time, timezone, timedelta
 
@@ -25,6 +26,11 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 SGT = timezone(timedelta(hours=8))
+
+
+def _html_escape(text: str) -> str:
+    """Escape text for HTML parse mode."""
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 async def post_init(application: Application) -> None:
@@ -63,33 +69,47 @@ async def hourly_reminder(context) -> None:
     if not user_ids:
         return
 
-    for telegram_id in user_ids:
-        try:
-            token = await models.get_canvas_token(telegram_id)
-            if not token:
-                continue
+    async def _send_reminder(telegram_id: int) -> None:
+        token = await models.get_canvas_token(telegram_id)
+        if not token:
+            return
 
-            upcoming = await canvas.get_upcoming_assignments(token, days=2)
-            if not upcoming:
-                continue
+        upcoming = await canvas.get_upcoming_assignments(token, days=2)
+        if not upcoming:
+            return
 
-            lines = ["Reminder: upcoming deadlines!\n"]
-            for a in upcoming:
-                course = a.get("_course_name", "Unknown")
-                due_dt = a["_due_dt"]
-                item_type = a.get("_type", "assignment")
-                tag = "[Q] " if item_type == "quiz" else ""
-                lines.append(f"- {tag}{a['name']} ({course})")
-                lines.append(f"  Due: {due_dt.strftime('%d %b %H:%M')}\n")
+        lines = ["<b>Reminder: upcoming deadlines!</b>\n"]
+        for a in upcoming:
+            course = _html_escape(a.get("_course_name", "Unknown"))
+            due_dt = a["_due_dt"]
+            item_type = a.get("_type", "assignment")
+            course_id = a.get("_course_id", 0)
+            tag = "[Q] " if item_type == "quiz" else ""
+            if item_type == "quiz":
+                url = canvas.quiz_url(course_id, a["id"])
+            else:
+                url = canvas.assignment_url(course_id, a["id"])
+            name = _html_escape(a["name"])
+            lines.append(f'- {tag}<a href="{url}">{name}</a> ({course})')
+            lines.append(f"  Due: {due_dt.strftime('%d %b %H:%M')}\n")
 
-            msg = await context.bot.send_message(
-                chat_id=telegram_id, text="\n".join(lines)
-            )
-            # Track as latest bot message for edit-or-reply logic
-            chat_data = context.application.chat_data.setdefault(telegram_id, {})
-            chat_data["_last_bot_msg_id"] = msg.message_id
-        except Exception as e:
-            logger.error("Reminder failed for user %s: %s", telegram_id, e)
+        msg = await context.bot.send_message(
+            chat_id=telegram_id,
+            text="\n".join(lines),
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+        # Track as latest bot message for edit-or-reply logic
+        chat_data = context.application.chat_data.setdefault(telegram_id, {})
+        chat_data["_last_bot_msg_id"] = msg.message_id
+
+    results = await asyncio.gather(
+        *[_send_reminder(tid) for tid in user_ids],
+        return_exceptions=True,
+    )
+    for tid, result in zip(user_ids, results):
+        if isinstance(result, Exception):
+            logger.error("Reminder failed for user %s: %s", tid, result)
 
 
 def main() -> None:
@@ -138,7 +158,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(todos.todos_show_all_callback, pattern=r"^todos_(all|active)$"))
     app.add_handler(CallbackQueryHandler(todos.todo_toggle_callback, pattern=r"^todotoggle_\d+$"))
     app.add_handler(CallbackQueryHandler(todos.todo_delete_callback, pattern=r"^tododel_\d+$"))
-    app.add_handler(CallbackQueryHandler(assignments.due_toggle_callback, pattern=r"^due_(show|hide)_submitted$"))
+    app.add_handler(CallbackQueryHandler(assignments.due_toggle_callback, pattern=r"^due_(show|hide)_submitted(_\d+)?$"))
     app.add_handler(CallbackQueryHandler(assignments.course_callback, pattern=r"^course_\d+$"))
     app.add_handler(CallbackQueryHandler(assignments.assignment_detail_callback, pattern=r"^asgn_\d+_\d+$"))
     app.add_handler(CallbackQueryHandler(assignments.quiz_detail_callback, pattern=r"^quiz_\d+_\d+$"))

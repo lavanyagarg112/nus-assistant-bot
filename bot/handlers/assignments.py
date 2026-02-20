@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -111,20 +112,25 @@ async def course_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     await query.edit_message_text("Loading assignments and quizzes...")
 
-    course_name = await _course_name(token, course_id)
+    # Fetch course name, assignments, and quizzes in parallel
+    course_name_task = _course_name(token, course_id)
+    assignments_task = canvas.get_assignments(token, course_id)
+    quizzes_task = canvas.get_quizzes(token, course_id)
 
-    try:
-        assignments = await canvas.get_assignments(token, course_id)
-    except Exception:
+    results = await asyncio.gather(
+        course_name_task, assignments_task, quizzes_task,
+        return_exceptions=True,
+    )
+
+    course_name = results[0] if not isinstance(results[0], Exception) else None
+
+    if isinstance(results[1], Exception):
         logger.error("Canvas API error fetching assignments for user %s", update.effective_user.id)
         await query.edit_message_text("Failed to fetch assignments.")
         return
+    assignments = results[1]
 
-    quizzes = []
-    try:
-        quizzes = await canvas.get_quizzes(token, course_id)
-    except Exception:
-        logger.debug("Could not fetch quizzes for course %s", course_id)
+    quizzes = results[2] if not isinstance(results[2], Exception) else []
 
     path = breadcrumb("Assignments", course_name) if course_name else "Assignments"
 
@@ -414,8 +420,9 @@ async def due_toggle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not token:
         return
 
-    show_submitted = query.data == "due_show_submitted"
-    days = 7
+    parts = query.data.split("_")
+    show_submitted = parts[1] == "show"
+    days = int(parts[3]) if len(parts) > 3 else 7
 
     try:
         text, markup = await _fetch_and_format_due(token, days, show_submitted=show_submitted)
