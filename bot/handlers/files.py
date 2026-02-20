@@ -6,6 +6,7 @@ from telegram.ext import ContextTypes
 import config
 from bot import keyboards
 from bot.handlers.assignments import (
+    TOKEN_EXPIRED_MSG,
     _course_name,
     _escape_md,
     _escape_url,
@@ -13,6 +14,7 @@ from bot.handlers.assignments import (
 )
 from bot.utils import breadcrumb, reply, reply_or_edit
 from canvas import client as canvas
+from canvas.client import CanvasTokenError
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,9 @@ async def files_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     loading = await reply(msg, context, "Loading courses...")
     try:
         courses = await canvas.get_courses(token)
+    except CanvasTokenError:
+        await loading.edit_text(TOKEN_EXPIRED_MSG)
+        return
     except Exception:
         logger.error("Canvas API error fetching courses for user %s", update.effective_user.id)
         await loading.edit_text("Failed to fetch courses.")
@@ -52,6 +57,9 @@ async def files_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     try:
         courses = await canvas.get_courses(token)
+    except CanvasTokenError:
+        await reply_or_edit(query, context, TOKEN_EXPIRED_MSG)
+        return
     except Exception:
         logger.error("Canvas API error fetching courses for user %s", update.effective_user.id)
         await reply_or_edit(query, context, "Failed to fetch courses.")
@@ -88,6 +96,9 @@ async def file_course_callback(
 
     try:
         root = await canvas.get_root_folder(token, course_id)
+    except CanvasTokenError:
+        await query.edit_message_text(TOKEN_EXPIRED_MSG)
+        return
     except Exception:
         logger.error("Canvas API error fetching root folder for user %s", update.effective_user.id)
         await query.edit_message_text("Failed to load files for this course.")
@@ -148,6 +159,9 @@ async def _show_folder(query, token: str, folder_id: int, course_id: int, path: 
     try:
         subfolders = await canvas.get_subfolders(token, folder_id)
         files = await canvas.get_folder_files(token, folder_id)
+    except CanvasTokenError:
+        await query.edit_message_text(TOKEN_EXPIRED_MSG)
+        return
     except Exception:
         logger.error("Canvas API error fetching folder %s", folder_id)
         await query.edit_message_text("Failed to load folder contents.")

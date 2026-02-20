@@ -8,9 +8,12 @@ from telegram.ext import ContextTypes
 from bot import keyboards
 from bot.utils import breadcrumb, reply, reply_or_edit
 from canvas import client as canvas
+from canvas.client import CanvasTokenError
 from db import models
 
 logger = logging.getLogger(__name__)
+
+TOKEN_EXPIRED_MSG = "Your Canvas token has expired or is invalid.\nRun /setup to add a new one (your notes, todos, etc. will be kept)."
 
 
 async def _require_token(update: Update, context: ContextTypes.DEFAULT_TYPE = None) -> str | None:
@@ -61,6 +64,9 @@ async def assignments_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     loading = await reply(msg, context, "Loading courses...")
     try:
         courses = await canvas.get_courses(token)
+    except CanvasTokenError:
+        await loading.edit_text(TOKEN_EXPIRED_MSG)
+        return
     except Exception:
         logger.error("Canvas API error fetching courses for user %s", update.effective_user.id)
         await loading.edit_text("Failed to fetch courses. Check your Canvas token with /setup.")
@@ -84,6 +90,9 @@ async def assignments_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     try:
         courses = await canvas.get_courses(token)
+    except CanvasTokenError:
+        await reply_or_edit(query, context, TOKEN_EXPIRED_MSG)
+        return
     except Exception:
         logger.error("Canvas API error fetching courses for user %s", update.effective_user.id)
         await reply_or_edit(query, context, "Failed to fetch courses.")
@@ -125,6 +134,9 @@ async def course_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     course_name = results[0] if not isinstance(results[0], Exception) else None
 
     if isinstance(results[1], Exception):
+        if isinstance(results[1], CanvasTokenError):
+            await query.edit_message_text(TOKEN_EXPIRED_MSG)
+            return
         logger.error("Canvas API error fetching assignments for user %s", update.effective_user.id)
         await query.edit_message_text("Failed to fetch assignments.")
         return
@@ -177,6 +189,9 @@ async def assignment_detail_callback(
 
     try:
         assignment = await canvas.get_assignment(token, course_id, assignment_id)
+    except CanvasTokenError:
+        await query.edit_message_text(TOKEN_EXPIRED_MSG)
+        return
     except Exception:
         logger.error("Canvas API error fetching assignment for user %s", update.effective_user.id)
         await query.edit_message_text("Failed to fetch assignment details.")
@@ -205,7 +220,7 @@ async def assignment_detail_callback(
 
     text = (
         f"{path}\n\n"
-        f"Type: \[A\] Assignment\n"
+        f"Type: \\[A\\] Assignment\n"
         f"Due: {_escape_md(due)}\n"
         f"Points: {_escape_md(str(points))}\n"
         f"Status: {_escape_md(status)}\n"
@@ -239,6 +254,9 @@ async def quiz_detail_callback(
 
     try:
         quiz = await canvas.get_quiz(token, course_id, quiz_id)
+    except CanvasTokenError:
+        await query.edit_message_text(TOKEN_EXPIRED_MSG)
+        return
     except Exception:
         logger.error("Canvas API error fetching quiz for user %s", update.effective_user.id)
         await query.edit_message_text("Failed to fetch quiz details.")
@@ -274,7 +292,7 @@ async def quiz_detail_callback(
 
     text = (
         f"{path}\n\n"
-        f"Type: \[Q\] Quiz\n"
+        f"Type: \\[Q\\] Quiz\n"
         f"Due: {_escape_md(due)}\n"
         f"Points: {_escape_md(str(points))}\n"
         f"Time limit: {_escape_md(time_str)}\n"
@@ -367,6 +385,9 @@ async def due_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     loading = await reply(msg, context, "Loading upcoming deadlines...")
     try:
         text, markup = await _fetch_and_format_due(token, days)
+    except CanvasTokenError:
+        await loading.edit_text(TOKEN_EXPIRED_MSG)
+        return
     except Exception:
         logger.error("Canvas API error fetching deadlines for user %s", update.effective_user.id)
         await loading.edit_text("Failed to fetch assignments.")
@@ -397,6 +418,9 @@ async def due_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     loading = await reply_or_edit(query, context, "Loading upcoming deadlines...")
     try:
         text, markup = await _fetch_and_format_due(token, days)
+    except CanvasTokenError:
+        await loading.edit_text(TOKEN_EXPIRED_MSG)
+        return
     except Exception:
         logger.error("Canvas API error fetching deadlines for user %s", update.effective_user.id)
         await loading.edit_text("Failed to fetch assignments.")
@@ -430,6 +454,9 @@ async def due_toggle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     try:
         text, markup = await _fetch_and_format_due(token, days, show_submitted=show_submitted)
+    except CanvasTokenError:
+        await query.edit_message_text(TOKEN_EXPIRED_MSG)
+        return
     except Exception:
         logger.error("Canvas API error fetching deadlines for user %s", update.effective_user.id)
         await query.edit_message_text("Failed to fetch assignments.")

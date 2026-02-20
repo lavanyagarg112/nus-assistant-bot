@@ -29,17 +29,19 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
     telegram_id = update.effective_user.id
     existing_token = await models.get_canvas_token(telegram_id)
+
     if existing_token:
-        await reply(
-            update.message, context,
+        prompt = (
             "You already have a Canvas account linked.\n"
-            "Use /unlink to remove it first if you want to use a different token."
+            "If your token expired, you can paste a new one now to update it. "
+            "Your notes, todos, and other data will be kept.\n\n"
         )
-        return ConversationHandler.END
+    else:
+        prompt = "Let's link your Canvas account.\n\n"
 
     await reply(
         update.message, context,
-        "Let's link your Canvas account.\n\n"
+        f"{prompt}"
         "To get your Canvas API token:\n"
         "1. Go to https://canvas.nus.edu.sg\n"
         "2. Click your profile icon -> Settings\n"
@@ -86,6 +88,8 @@ async def setup_receive_token(update: Update, context: ContextTypes.DEFAULT_TYPE
         return ConversationHandler.END
 
     await models.upsert_user(telegram_id, token)
+    # Clear any stale course cache from old token
+    canvas.clear_course_cache(token)
     await send(
         update.effective_chat, context,
         f"Canvas token verified and saved! Found {len(courses)} active course(s).\n\n"

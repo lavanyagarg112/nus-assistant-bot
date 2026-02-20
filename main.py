@@ -13,6 +13,7 @@ from telegram.ext import (
 import config
 from bot.handlers import admin, assignments, files, notes, settings, start, todos
 from canvas import client as canvas
+from canvas.client import CanvasTokenError
 from db import models
 from db.database import close_db, init_db
 
@@ -74,7 +75,15 @@ async def hourly_reminder(context) -> None:
         if not token:
             return
 
-        upcoming = await canvas.get_upcoming_assignments(token, days=2)
+        try:
+            upcoming = await canvas.get_upcoming_assignments(token, days=2)
+        except CanvasTokenError:
+            await context.bot.send_message(
+                chat_id=telegram_id,
+                text="Your Canvas token has expired or is invalid.\nRun /setup to add a new one (your notes, todos, etc. will be kept).",
+            )
+            return
+
         if not upcoming:
             return
 

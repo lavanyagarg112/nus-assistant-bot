@@ -11,8 +11,9 @@ from telegram.ext import (
 )
 
 from bot import keyboards
-from bot.handlers.assignments import _escape_md, _truncate_message
+from bot.handlers.assignments import _escape_md, _truncate_message, TOKEN_EXPIRED_MSG
 from bot.utils import make_fallback_command, reply, reply_or_edit
+from canvas.client import CanvasTokenError
 from canvas import client as canvas
 from db import models
 
@@ -203,6 +204,9 @@ async def add_todo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     try:
         courses = await canvas.get_courses(token)
+    except CanvasTokenError:
+        await reply(update.message, context, TOKEN_EXPIRED_MSG)
+        return
     except Exception:
         await reply(update.message, context, "Failed to fetch courses.")
         return

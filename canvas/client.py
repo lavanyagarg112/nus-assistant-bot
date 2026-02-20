@@ -13,6 +13,12 @@ CANVAS_API = f"{config.CANVAS_BASE_URL}/api/v1"
 PER_PAGE = 50
 MAX_PAGES = 20
 
+
+class CanvasTokenError(Exception):
+    """Raised when the Canvas API returns 401 (token expired/invalid)."""
+    pass
+
+
 # In-memory course cache: token_sha256 -> courses (permanent until /refresh)
 _course_cache: dict[str, list[dict]] = {}
 
@@ -36,6 +42,8 @@ async def _get_paginated(
             logger.warning("Pagination limit reached (%d pages), stopping", MAX_PAGES)
             break
         resp = await client.get(next_url, headers=headers, params=params)
+        if resp.status_code == 401:
+            raise CanvasTokenError("Canvas API token is invalid or expired")
         resp.raise_for_status()
 
         # Respect rate limits
@@ -227,6 +235,8 @@ async def get_quiz(token: str, course_id: int, quiz_id: int) -> dict | None:
             f"{CANVAS_API}/courses/{course_id}/quizzes/{quiz_id}",
             headers=_auth_headers(token),
         )
+        if resp.status_code == 401:
+            raise CanvasTokenError("Canvas API token is invalid or expired")
         if resp.status_code == 404:
             return None
         resp.raise_for_status()
@@ -240,6 +250,8 @@ async def get_quiz_submission(token: str, course_id: int, quiz_id: int) -> dict 
             f"{CANVAS_API}/courses/{course_id}/quizzes/{quiz_id}/submissions",
             headers=_auth_headers(token),
         )
+        if resp.status_code == 401:
+            raise CanvasTokenError("Canvas API token is invalid or expired")
         if resp.status_code == 404:
             return None
         resp.raise_for_status()
@@ -333,6 +345,8 @@ async def get_root_folder(token: str, course_id: int) -> dict | None:
             f"{CANVAS_API}/courses/{course_id}/folders/root",
             headers=_auth_headers(token),
         )
+        if resp.status_code == 401:
+            raise CanvasTokenError("Canvas API token is invalid or expired")
         if resp.status_code == 404:
             return None
         resp.raise_for_status()
@@ -367,6 +381,8 @@ async def get_assignment(token: str, course_id: int, assignment_id: int) -> dict
             headers=_auth_headers(token),
             params={"include[]": "submission"},
         )
+        if resp.status_code == 401:
+            raise CanvasTokenError("Canvas API token is invalid or expired")
         if resp.status_code == 404:
             return None
         resp.raise_for_status()
