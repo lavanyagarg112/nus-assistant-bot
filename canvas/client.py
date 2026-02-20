@@ -274,12 +274,17 @@ def is_submitted(item: dict) -> bool:
     """Check if an assignment or quiz has been submitted."""
     if item.get("_type") == "quiz":
         return bool(item.get("_submitted"))
-    # For assignments, check submission.workflow_state
+    # For assignments, check submission.workflow_state *and* that there
+    # was a real submission attempt.  Canvas always returns a submission
+    # object (even when the student never submitted), and instructors can
+    # set workflow_state to "graded" without an actual submission.
     sub = item.get("submission", {})
     if not sub:
         return False
     state = sub.get("workflow_state", "unsubmitted")
-    return state in ("submitted", "graded", "pending_review")
+    if state not in ("submitted", "graded", "pending_review"):
+        return False
+    return bool(sub.get("attempt"))
 
 
 def submission_status_text(item: dict) -> str:
@@ -290,15 +295,22 @@ def submission_status_text(item: dict) -> str:
     if not sub:
         return "Not submitted"
     state = sub.get("workflow_state", "unsubmitted")
+    has_attempt = bool(sub.get("attempt"))
     if state == "graded":
+        if not has_attempt:
+            # Instructor graded without a student submission
+            score = sub.get("score")
+            if score is not None:
+                return f"Graded, no submission ({score} pts)"
+            return "Not submitted"
         score = sub.get("score")
         if score is not None:
             return f"Graded ({score} pts)"
         return "Graded"
     if state == "submitted":
-        return "Submitted"
+        return "Submitted" if has_attempt else "Not submitted"
     if state == "pending_review":
-        return "Pending review"
+        return "Pending review" if has_attempt else "Not submitted"
     return "Not submitted"
 
 

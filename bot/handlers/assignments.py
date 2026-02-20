@@ -205,6 +205,7 @@ async def assignment_detail_callback(
 
     text = (
         f"{path}\n\n"
+        f"Type: \[A\] Assignment\n"
         f"Due: {_escape_md(due)}\n"
         f"Points: {_escape_md(str(points))}\n"
         f"Status: {_escape_md(status)}\n"
@@ -273,6 +274,7 @@ async def quiz_detail_callback(
 
     text = (
         f"{path}\n\n"
+        f"Type: \[Q\] Quiz\n"
         f"Due: {_escape_md(due)}\n"
         f"Points: {_escape_md(str(points))}\n"
         f"Time limit: {_escape_md(time_str)}\n"
@@ -314,11 +316,12 @@ async def _fetch_and_format_due(
             course = a.get("_course_name", "Unknown")
             course_id = a.get("_course_id", 0)
             item_type = a.get("_type", "assignment")
+            type_tag = "\\[Q\\]" if item_type == "quiz" else "\\[A\\]"
             if item_type == "quiz":
                 link = canvas.quiz_url(course_id, a["id"])
             else:
                 link = canvas.assignment_url(course_id, a["id"])
-            lines.append(f"\\- [{_escape_md(a['name'])}]({_escape_url(link)})")
+            lines.append(f"\\- {type_tag} [{_escape_md(a['name'])}]({_escape_url(link)})")
             lines.append(f"  {_escape_md(course)} \\| {_escape_md(due)}\n")
     else:
         lines.append("_All items have been submitted\\!_\n")
@@ -330,11 +333,12 @@ async def _fetch_and_format_due(
             course = a.get("_course_name", "Unknown")
             course_id = a.get("_course_id", 0)
             item_type = a.get("_type", "assignment")
+            type_tag = "\\[Q\\]" if item_type == "quiz" else "\\[A\\]"
             if item_type == "quiz":
                 link = canvas.quiz_url(course_id, a["id"])
             else:
                 link = canvas.assignment_url(course_id, a["id"])
-            lines.append(f"\\- \u2705 [{_escape_md(a['name'])}]({_escape_url(link)})")
+            lines.append(f"\\- \u2705 {type_tag} [{_escape_md(a['name'])}]({_escape_url(link)})")
             lines.append(f"  {_escape_md(course)} \\| {_escape_md(due)}\n")
     elif submitted:
         lines.append(f"_{_escape_md(str(len(submitted)))} submitted item\\(s\\) hidden_")

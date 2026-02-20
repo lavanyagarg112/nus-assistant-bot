@@ -57,14 +57,14 @@ def course_items_list(
     for a in assignments[:15]:
         icon = "\u2705" if is_submitted(a) else "\u2b1c"
         buttons.append([InlineKeyboardButton(
-            f"{icon} {a['name'][:36]}",
+            f"{icon} [A] {a['name'][:33]}",
             callback_data=f"asgn_{course_id}_{a['id']}",
         )])
     for q in quizzes[:10]:
         q_item = {**q, "_type": "quiz"}
         icon = "\u2705" if is_submitted(q_item) else "\u2b1c"
         buttons.append([InlineKeyboardButton(
-            f"{icon} {q.get('title', 'Quiz')[:36]}",
+            f"{icon} [Q] {q.get('title', 'Quiz')[:33]}",
             callback_data=f"quiz_{course_id}_{q['id']}",
         )])
     buttons.append(
