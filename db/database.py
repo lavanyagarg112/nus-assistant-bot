@@ -1,7 +1,22 @@
+import logging
+import os
+import stat
+
 import aiosqlite
 import config
 
+logger = logging.getLogger(__name__)
+
 _db: aiosqlite.Connection | None = None
+
+
+def _lock_db_permissions() -> None:
+    """Restrict the database file (and WAL/SHM siblings) to owner-only access (chmod 600)."""
+    for suffix in ("", "-wal", "-shm"):
+        path = config.DB_PATH + suffix
+        if os.path.exists(path):
+            os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)  # 0o600
+    logger.info("Database file permissions restricted to owner-only (600)")
 
 
 async def get_db() -> aiosqlite.Connection:
@@ -11,6 +26,7 @@ async def get_db() -> aiosqlite.Connection:
         _db.row_factory = aiosqlite.Row
         await _db.execute("PRAGMA journal_mode=WAL")
         await _db.execute("PRAGMA foreign_keys=ON")
+        _lock_db_permissions()
     return _db
 
 

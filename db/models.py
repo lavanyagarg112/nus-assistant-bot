@@ -1,6 +1,10 @@
-from cryptography.fernet import Fernet
+import logging
+
+from cryptography.fernet import Fernet, InvalidToken
 import config
 from db.database import get_db
+
+logger = logging.getLogger(__name__)
 
 _fernet = Fernet(config.FERNET_KEY.encode())
 
@@ -270,3 +274,78 @@ async def delete_note(telegram_id: int, canvas_assignment_id: int) -> bool:
     )
     await db.commit()
     return cursor.rowcount > 0
+
+
+# ── Legacy migration ──
+
+
+def _is_encrypted(value: str) -> bool:
+    """Heuristic: Fernet tokens are url-safe base64 starting with 'gAAAAA'."""
+    try:
+        _fernet.decrypt(value.encode())
+        return True
+    except Exception:
+        return False
+
+
+async def migrate_encrypt_legacy_rows() -> dict:
+    """Re-encrypt any plain-text legacy rows in-place. Safe to run multiple times.
+
+    Returns a dict with counts of migrated rows per table.
+    """
+    db = await get_db()
+    migrated = {"users": 0, "notes": 0, "general_notes": 0, "todos": 0}
+
+    # ── users.canvas_token_encrypted ──
+    rows = await db.execute_fetchall("SELECT telegram_id, canvas_token_encrypted FROM users")
+    for r in rows:
+        tid, val = r[0], r[1]
+        if not _is_encrypted(val):
+            await db.execute(
+                "UPDATE users SET canvas_token_encrypted = ? WHERE telegram_id = ?",
+                (_encrypt(val), tid),
+            )
+            migrated["users"] += 1
+
+    # ── notes.note_text ──
+    rows = await db.execute_fetchall("SELECT id, note_text FROM notes")
+    for r in rows:
+        nid, val = r[0], r[1]
+        if not _is_encrypted(val):
+            await db.execute(
+                "UPDATE notes SET note_text = ? WHERE id = ?",
+                (_encrypt(val), nid),
+            )
+            migrated["notes"] += 1
+
+    # ── general_notes.content ──
+    rows = await db.execute_fetchall("SELECT id, content FROM general_notes")
+    for r in rows:
+        nid, val = r[0], r[1]
+        if not _is_encrypted(val):
+            await db.execute(
+                "UPDATE general_notes SET content = ? WHERE id = ?",
+                (_encrypt(val), nid),
+            )
+            migrated["general_notes"] += 1
+
+    # ── todos.text ──
+    rows = await db.execute_fetchall("SELECT id, text FROM todos")
+    for r in rows:
+        nid, val = r[0], r[1]
+        if not _is_encrypted(val):
+            await db.execute(
+                "UPDATE todos SET text = ? WHERE id = ?",
+                (_encrypt(val), nid),
+            )
+            migrated["todos"] += 1
+
+    await db.commit()
+
+    total = sum(migrated.values())
+    if total > 0:
+        logger.info("Migrated %d legacy plain-text rows to encrypted: %s", total, migrated)
+    else:
+        logger.info("No legacy plain-text rows found — all data already encrypted")
+
+    return migrated

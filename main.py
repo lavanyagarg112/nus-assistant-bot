@@ -37,6 +37,7 @@ def _html_escape(text: str) -> str:
 async def post_init(application: Application) -> None:
     await init_db()
     logger.info("Database initialized")
+    await models.migrate_encrypt_legacy_rows()
 
 
 async def post_shutdown(application: Application) -> None:

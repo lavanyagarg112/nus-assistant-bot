@@ -46,7 +46,13 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         "1. Go to https://canvas.nus.edu.sg\n"
         "2. Click your profile icon -> Settings\n"
         "3. Scroll to Approved Integrations -> + New Access Token\n"
-        "4. Copy the token\n\n"
+        "4. Set an expiry date for the token (recommended for security)\n"
+        "5. Copy the token\n\n"
+        "🔒 Security tips:\n"
+        "• Your token is stored encrypted — never in plain text\n"
+        "• Always set a token expiry — avoid tokens that never expire\n"
+        "• You can update your token anytime by running /setup again\n"
+        "• Use /unlink to remove your token and all data at any time\n\n"
         "Please paste your Canvas API token now.\n"
         "(Your message will be deleted for security)\n\n"
         "Send /cancel to abort."
@@ -93,7 +99,10 @@ async def setup_receive_token(update: Update, context: ContextTypes.DEFAULT_TYPE
     await send(
         update.effective_chat, context,
         f"Canvas token verified and saved! Found {len(courses)} active course(s).\n\n"
-        "Try /assignments or /due to see your assignments."
+        "Try /assignments or /due to see your assignments.\n\n"
+        "🔒 Remember:\n"
+        "• /setup — replace your token anytime\n"
+        "• /unlink — remove your token & all data"
     )
     return ConversationHandler.END
 
