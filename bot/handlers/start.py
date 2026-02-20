@@ -13,7 +13,7 @@ WELCOME_MSG = (
 
 HELP_MSG = (
     "📚 *Assignments & Deadlines*\n"
-    "/assignments — Browse by course \\(includes quizzes - [Q], assignments - [A]\\)\n"
+    "/assignments — Browse by course \\(includes quizzes \\[Q\\], assignments \\[A\\]\\)\n"
     "/due \\[days\\] — Upcoming deadlines \\(default 7, e\\.g\\. /due 14\\)\n"
     "\n"
     "📁 *Files*\n"
