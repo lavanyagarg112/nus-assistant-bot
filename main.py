@@ -38,10 +38,6 @@ async def post_init(application: Application) -> None:
     await init_db()
     logger.info("Database initialized")
     await models.migrate_encrypt_legacy_rows()
-    await models.fix_double_encrypted_rows()
-    if config.OLD_FERNET_KEY:
-        await models.rotate_encryption_key()
-        logger.info("Key rotation complete — remove OLD_FERNET_KEY from .env and restart")
 
 
 async def post_shutdown(application: Application) -> None:

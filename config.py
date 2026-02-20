@@ -13,9 +13,6 @@ _admin_id = os.getenv("ADMIN_TELEGRAM_ID")
 ADMIN_TELEGRAM_ID = int(_admin_id) if _admin_id else None
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
 
-# Optional: set this to the OLD key when rotating FERNET_KEY.
-OLD_FERNET_KEY = os.getenv("OLD_FERNET_KEY")
-
 # ── Startup validations ──
 
 if not CANVAS_BASE_URL.startswith("https://"):
