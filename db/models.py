@@ -15,13 +15,30 @@ def _encrypt(plaintext: str) -> str:
 
 
 def _decrypt(ciphertext: str) -> str:
-    """Decrypt, unwrapping any double-encrypted values from the migration transition."""
-    result = _fernet.decrypt(ciphertext.encode()).decode()
-    # If the decrypted value is itself a Fernet token (double-encrypted), unwrap it
+    """Decrypt, unwrapping any double-encrypted values from the migration transition.
+
+    Tries all key combinations for two layers of encryption.
+    """
+    # Layer 1: try current key, then old key
     try:
-        result = _fernet.decrypt(result.encode()).decode()
-    except Exception:
-        pass
+        result = _fernet.decrypt(ciphertext.encode()).decode()
+    except (InvalidToken, Exception):
+        if _old_fernet is not None:
+            result = _old_fernet.decrypt(ciphertext.encode()).decode()
+        else:
+            raise
+
+    # Layer 2: if result looks like a Fernet token, try to unwrap it
+    if result.startswith("gAAAAA"):
+        for f in [_fernet] + ([_old_fernet] if _old_fernet else []):
+            try:
+                result = f.decrypt(result.encode()).decode()
+                break
+            except Exception:
+                continue
+        if result.startswith("gAAAAA"):
+            logger.warning("Decrypted value still looks like ciphertext — possible data issue")
+
     return result
 
 
@@ -367,20 +384,41 @@ async def migrate_encrypt_legacy_rows() -> dict:
 
 
 async def fix_double_encrypted_rows() -> dict:
+    """Detect and fix double-encrypted values. Tries all available keys for both layers."""
     db = await get_db()
     fixed = {"users": 0, "notes": 0, "general_notes": 0, "todos": 0}
+    all_fernets = [_fernet] + ([_old_fernet] if _old_fernet else [])
 
     def _unwrap(val: str) -> str | None:
-        """Decrypt once; if the result is itself encrypted, decrypt again. Returns final plaintext or None."""
-        try:
-            inner = _fernet.decrypt(val.encode()).decode()
-        except Exception:
+        """Try to peel two layers of encryption using all available keys."""
+        # Layer 1: decrypt the DB value
+        inner = None
+        for f in all_fernets:
+            try:
+                inner = f.decrypt(val.encode()).decode()
+                break
+            except Exception:
+                continue
+        if inner is None:
+            return None  # can't decrypt at all
+
+        # If inner doesn't look like a Fernet token, it's single-encrypted (fine)
+        if not inner.startswith("gAAAAA"):
             return None
-        try:
-            plaintext = _fernet.decrypt(inner.encode()).decode()
-            return plaintext  # was double-encrypted
-        except Exception:
-            return None  # single-encrypted, no fix needed
+
+        # Layer 2: inner looks like ciphertext — try to decrypt it
+        for f in all_fernets:
+            try:
+                plaintext = f.decrypt(inner.encode()).decode()
+                logger.info("Unwrapped double-encrypted value successfully")
+                return plaintext
+            except Exception:
+                continue
+
+        # Inner looks like Fernet but we can't decrypt it — it's corrupt/orphaned
+        # Store the inner value as-is (better than double-encrypted)
+        logger.warning("Found double-encrypted row but inner layer can't be decrypted — storing inner value as plaintext")
+        return inner
 
     # ── users ──
     rows = await db.execute_fetchall("SELECT telegram_id, canvas_token_encrypted FROM users")
