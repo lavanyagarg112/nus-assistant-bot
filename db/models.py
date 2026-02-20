@@ -105,7 +105,7 @@ async def upsert_note(
         ON CONFLICT(telegram_id, canvas_assignment_id)
         DO UPDATE SET note_text = excluded.note_text, updated_at = CURRENT_TIMESTAMP
         """,
-        (telegram_id, canvas_assignment_id, canvas_course_id, note_text),
+        (telegram_id, canvas_assignment_id, canvas_course_id, _encrypt(note_text)),
     )
     await db.commit()
 
@@ -118,7 +118,7 @@ async def get_note(telegram_id: int, canvas_assignment_id: int) -> str | None:
     )
     if not rows:
         return None
-    return rows[0][0]
+    return _decrypt(rows[0][0])
 
 
 async def get_all_notes(telegram_id: int) -> list[dict]:
@@ -134,7 +134,7 @@ async def get_all_notes(telegram_id: int) -> list[dict]:
         {
             "canvas_assignment_id": r[0],
             "canvas_course_id": r[1],
-            "note_text": r[2],
+            "note_text": _decrypt(r[2]),
             "updated_at": r[3],
         }
         for r in rows
@@ -145,7 +145,7 @@ async def add_general_note(telegram_id: int, content: str) -> None:
     db = await get_db()
     await db.execute(
         "INSERT INTO general_notes (telegram_id, content) VALUES (?, ?)",
-        (telegram_id, content),
+        (telegram_id, _encrypt(content)),
     )
     await db.commit()
 
@@ -156,7 +156,7 @@ async def get_all_general_notes(telegram_id: int) -> list[dict]:
         "SELECT id, content, created_at FROM general_notes WHERE telegram_id = ? ORDER BY created_at DESC",
         (telegram_id,),
     )
-    return [{"id": r[0], "content": r[1], "created_at": r[2]} for r in rows]
+    return [{"id": r[0], "content": _decrypt(r[1]), "created_at": r[2]} for r in rows]
 
 
 # ── Todos CRUD ──
@@ -166,7 +166,7 @@ async def add_todo(telegram_id: int, text: str, canvas_course_id: int | None = N
     db = await get_db()
     cursor = await db.execute(
         "INSERT INTO todos (telegram_id, canvas_course_id, text) VALUES (?, ?, ?)",
-        (telegram_id, canvas_course_id, text),
+        (telegram_id, canvas_course_id, _encrypt(text)),
     )
     await db.commit()
     return cursor.lastrowid
@@ -185,7 +185,7 @@ async def get_todos(telegram_id: int, include_done: bool = False) -> list[dict]:
             (telegram_id,),
         )
     return [
-        {"id": r[0], "canvas_course_id": r[1], "text": r[2], "done": r[3], "created_at": r[4]}
+        {"id": r[0], "canvas_course_id": r[1], "text": _decrypt(r[2]), "done": r[3], "created_at": r[4]}
         for r in rows
     ]
 
@@ -243,32 +243,23 @@ async def get_all_user_ids() -> list[int]:
 
 
 async def search_notes(telegram_id: int, query: str) -> tuple[list[dict], list[dict]]:
-    """Search assignment notes and general notes by keyword. Returns (assignment_notes, general_notes)."""
-    db = await get_db()
-    escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    like_pattern = f"%{escaped}%"
-    a_rows = await db.execute_fetchall(
-        """
-        SELECT canvas_assignment_id, canvas_course_id, note_text, updated_at
-        FROM notes WHERE telegram_id = ? AND note_text LIKE ? ESCAPE '\\'
-        ORDER BY updated_at DESC
-        """,
-        (telegram_id, like_pattern),
-    )
-    assignment_notes = [
-        {"canvas_assignment_id": r[0], "canvas_course_id": r[1], "note_text": r[2], "updated_at": r[3]}
-        for r in a_rows
+    """Search assignment notes and general notes by keyword. Returns (assignment_notes, general_notes).
+
+    Since note content is encrypted, we decrypt all user notes and filter in Python.
+    """
+    query_lower = query.lower()
+
+    assignment_notes = await get_all_notes(telegram_id)
+    matching_assignment = [
+        n for n in assignment_notes if query_lower in n["note_text"].lower()
     ]
-    g_rows = await db.execute_fetchall(
-        """
-        SELECT id, content, created_at
-        FROM general_notes WHERE telegram_id = ? AND content LIKE ? ESCAPE '\\'
-        ORDER BY created_at DESC
-        """,
-        (telegram_id, like_pattern),
-    )
-    general_notes = [{"id": r[0], "content": r[1], "created_at": r[2]} for r in g_rows]
-    return assignment_notes, general_notes
+
+    general_notes = await get_all_general_notes(telegram_id)
+    matching_general = [
+        n for n in general_notes if query_lower in n["content"].lower()
+    ]
+
+    return matching_assignment, matching_general
 
 
 async def delete_note(telegram_id: int, canvas_assignment_id: int) -> bool:
