@@ -15,7 +15,14 @@ def _encrypt(plaintext: str) -> str:
 
 
 def _decrypt(ciphertext: str) -> str:
-    return _fernet.decrypt(ciphertext.encode()).decode()
+    """Decrypt, unwrapping any double-encrypted values from the migration transition."""
+    result = _fernet.decrypt(ciphertext.encode()).decode()
+    # If the decrypted value is itself a Fernet token (double-encrypted), unwrap it
+    try:
+        result = _fernet.decrypt(result.encode()).decode()
+    except Exception:
+        pass
+    return result
 
 
 def _decrypt_with_old(ciphertext: str) -> str:
@@ -359,7 +366,79 @@ async def migrate_encrypt_legacy_rows() -> dict:
     return migrated
 
 
-async def rotate_encryption_key() -> dict:
+async def fix_double_encrypted_rows() -> dict:
+    db = await get_db()
+    fixed = {"users": 0, "notes": 0, "general_notes": 0, "todos": 0}
+
+    def _unwrap(val: str) -> str | None:
+        """Decrypt once; if the result is itself encrypted, decrypt again. Returns final plaintext or None."""
+        try:
+            inner = _fernet.decrypt(val.encode()).decode()
+        except Exception:
+            return None
+        try:
+            plaintext = _fernet.decrypt(inner.encode()).decode()
+            return plaintext  # was double-encrypted
+        except Exception:
+            return None  # single-encrypted, no fix needed
+
+    # ── users ──
+    rows = await db.execute_fetchall("SELECT telegram_id, canvas_token_encrypted FROM users")
+    for r in rows:
+        tid, val = r[0], r[1]
+        plaintext = _unwrap(val)
+        if plaintext is not None:
+            await db.execute(
+                "UPDATE users SET canvas_token_encrypted = ? WHERE telegram_id = ?",
+                (_encrypt(plaintext), tid),
+            )
+            fixed["users"] += 1
+
+    # ── notes ──
+    rows = await db.execute_fetchall("SELECT id, note_text FROM notes")
+    for r in rows:
+        nid, val = r[0], r[1]
+        plaintext = _unwrap(val)
+        if plaintext is not None:
+            await db.execute(
+                "UPDATE notes SET note_text = ? WHERE id = ?",
+                (_encrypt(plaintext), nid),
+            )
+            fixed["notes"] += 1
+
+    # ── general_notes ──
+    rows = await db.execute_fetchall("SELECT id, content FROM general_notes")
+    for r in rows:
+        nid, val = r[0], r[1]
+        plaintext = _unwrap(val)
+        if plaintext is not None:
+            await db.execute(
+                "UPDATE general_notes SET content = ? WHERE id = ?",
+                (_encrypt(plaintext), nid),
+            )
+            fixed["general_notes"] += 1
+
+    # ── todos ──
+    rows = await db.execute_fetchall("SELECT id, text FROM todos")
+    for r in rows:
+        nid, val = r[0], r[1]
+        plaintext = _unwrap(val)
+        if plaintext is not None:
+            await db.execute(
+                "UPDATE todos SET text = ? WHERE id = ?",
+                (_encrypt(plaintext), nid),
+            )
+            fixed["todos"] += 1
+
+    await db.commit()
+
+    total = sum(fixed.values())
+    if total > 0:
+        logger.info("Fixed %d double-encrypted rows: %s", total, fixed)
+    else:
+        logger.info("No double-encrypted rows found")
+
+    return fixed
     """Re-encrypt every encrypted value from OLD_FERNET_KEY to the current FERNET_KEY.
 
     Workflow:
