@@ -439,6 +439,9 @@ async def fix_double_encrypted_rows() -> dict:
         logger.info("No double-encrypted rows found")
 
     return fixed
+
+
+async def rotate_encryption_key() -> dict:
     """Re-encrypt every encrypted value from OLD_FERNET_KEY to the current FERNET_KEY.
 
     Workflow:
