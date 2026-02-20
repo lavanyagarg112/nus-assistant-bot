@@ -7,6 +7,7 @@ from db.database import get_db
 logger = logging.getLogger(__name__)
 
 _fernet = Fernet(config.FERNET_KEY.encode())
+_old_fernet = Fernet(config.OLD_FERNET_KEY.encode()) if config.OLD_FERNET_KEY else None
 
 
 def _encrypt(plaintext: str) -> str:
@@ -15,6 +16,13 @@ def _encrypt(plaintext: str) -> str:
 
 def _decrypt(ciphertext: str) -> str:
     return _fernet.decrypt(ciphertext.encode()).decode()
+
+
+def _decrypt_with_old(ciphertext: str) -> str:
+    """Decrypt using the old key. Raises InvalidToken if it fails."""
+    if _old_fernet is None:
+        raise InvalidToken
+    return _old_fernet.decrypt(ciphertext.encode()).decode()
 
 
 # ── User CRUD ──
@@ -349,3 +357,82 @@ async def migrate_encrypt_legacy_rows() -> dict:
         logger.info("No legacy plain-text rows found — all data already encrypted")
 
     return migrated
+
+
+async def rotate_encryption_key() -> dict:
+    """Re-encrypt every encrypted value from OLD_FERNET_KEY to the current FERNET_KEY.
+
+    Workflow:
+      1. Set OLD_FERNET_KEY=<current key> in .env
+      2. Set FERNET_KEY=<new key> in .env
+      3. Restart the bot — this function runs automatically
+      4. Remove OLD_FERNET_KEY from .env
+    """
+    if _old_fernet is None:
+        logger.info("No OLD_FERNET_KEY set — skipping key rotation")
+        return {}
+
+    db = await get_db()
+    rotated = {"users": 0, "notes": 0, "general_notes": 0, "todos": 0}
+
+    # ── users.canvas_token_encrypted ──
+    rows = await db.execute_fetchall("SELECT telegram_id, canvas_token_encrypted FROM users")
+    for r in rows:
+        tid, val = r[0], r[1]
+        try:
+            plaintext = _decrypt_with_old(val)
+        except (InvalidToken, Exception):
+            continue  # already encrypted with new key or unrecognised
+        await db.execute(
+            "UPDATE users SET canvas_token_encrypted = ? WHERE telegram_id = ?",
+            (_encrypt(plaintext), tid),
+        )
+        rotated["users"] += 1
+
+    # ── notes.note_text ──
+    rows = await db.execute_fetchall("SELECT id, note_text FROM notes")
+    for r in rows:
+        nid, val = r[0], r[1]
+        try:
+            plaintext = _decrypt_with_old(val)
+        except (InvalidToken, Exception):
+            continue
+        await db.execute(
+            "UPDATE notes SET note_text = ? WHERE id = ?",
+            (_encrypt(plaintext), nid),
+        )
+        rotated["notes"] += 1
+
+    # ── general_notes.content ──
+    rows = await db.execute_fetchall("SELECT id, content FROM general_notes")
+    for r in rows:
+        nid, val = r[0], r[1]
+        try:
+            plaintext = _decrypt_with_old(val)
+        except (InvalidToken, Exception):
+            continue
+        await db.execute(
+            "UPDATE general_notes SET content = ? WHERE id = ?",
+            (_encrypt(plaintext), nid),
+        )
+        rotated["general_notes"] += 1
+
+    # ── todos.text ──
+    rows = await db.execute_fetchall("SELECT id, text FROM todos")
+    for r in rows:
+        nid, val = r[0], r[1]
+        try:
+            plaintext = _decrypt_with_old(val)
+        except (InvalidToken, Exception):
+            continue
+        await db.execute(
+            "UPDATE todos SET text = ? WHERE id = ?",
+            (_encrypt(plaintext), nid),
+        )
+        rotated["todos"] += 1
+
+    await db.commit()
+
+    total = sum(rotated.values())
+    logger.info("Key rotation: re-encrypted %d rows with new key: %s", total, rotated)
+    return rotated
