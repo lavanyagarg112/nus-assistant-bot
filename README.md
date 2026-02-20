@@ -22,6 +22,13 @@ You'll need a **Canvas API token** — generate one from [Canvas](https://canvas
 | `/refresh` | Force a fresh fetch of your course list from Canvas |
 | `/help` | Full command list |
 
+**Admin commands** (optional, requires `ADMIN_TELEGRAM_ID` and `ADMIN_PASSWORD` in `.env`):
+
+| Command | Description |
+|---------|-------------|
+| `/admin <password>` | View user/note/todo counts |
+| `/broadcast <password>` | Send a message to all users |
+
 ---
 
 ## Self-Hosting
@@ -59,6 +66,8 @@ Edit `.env` and fill in:
 | `TELEGRAM_BOT_TOKEN` | From [@BotFather](https://t.me/BotFather) |
 | `FERNET_KEY` | Encryption key for Canvas tokens (see below) |
 | `CANVAS_BASE_URL` | Your Canvas instance URL (default: `https://canvas.nus.edu.sg`) |
+| `ADMIN_TELEGRAM_ID` | *(Optional)* Your Telegram user ID for admin commands |
+| `ADMIN_PASSWORD` | *(Optional)* Password required for admin commands |
 
 Generate a Fernet key:
 
@@ -87,7 +96,8 @@ The bot will initialise the SQLite database on first run and start polling for m
 │       ├── assignments.py   # /assignments, /due, assignment/quiz detail
 │       ├── notes.py         # /notes, /start_notes, /end_notes
 │       ├── files.py         # /files, folder browsing
-│       └── todos.py         # /todos, /add_todo
+│       ├── todos.py         # /todos, /add_todo
+│       └── admin.py         # /admin, /broadcast (optional)
 ├── canvas/
 │   └── client.py            # Async Canvas LMS API client
 ├── db/
