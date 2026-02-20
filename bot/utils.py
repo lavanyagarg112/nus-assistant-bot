@@ -5,8 +5,8 @@ whether to edit in place (message is still the latest) or reply fresh
 (user has sent messages since, so the button message is scrolled up).
 """
 
-from telegram import Message
-from telegram.ext import ContextTypes
+from telegram import Message, Update
+from telegram.ext import ContextTypes, ConversationHandler
 
 _KEY = "_last_bot_msg_id"
 
@@ -32,6 +32,12 @@ async def send(chat, context: ContextTypes.DEFAULT_TYPE, text: str, **kwargs) ->
 def breadcrumb(*parts: str) -> str:
     """Build a navigation path like 'Assignments > CS2030S > Homework 1'."""
     return " > ".join(parts)
+
+
+async def fallback_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Catch-all fallback for ConversationHandlers: cancel and tell user to retry."""
+    await reply(update.message, context, "Previous action cancelled. Please re-send your command.")
+    return ConversationHandler.END
 
 
 async def reply_or_edit(query, context: ContextTypes.DEFAULT_TYPE, text: str, **kwargs) -> Message:

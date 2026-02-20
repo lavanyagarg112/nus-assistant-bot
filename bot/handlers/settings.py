@@ -10,7 +10,7 @@ from telegram.ext import (
 )
 
 from bot import keyboards
-from bot.utils import reply, reply_or_edit, send
+from bot.utils import fallback_command, reply, reply_or_edit, send
 from canvas import client as canvas
 from db import models
 
@@ -208,5 +208,8 @@ def get_setup_handler() -> ConversationHandler:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, setup_receive_token)
             ],
         },
-        fallbacks=[CommandHandler("cancel", setup_cancel)],
+        fallbacks=[
+            CommandHandler("cancel", setup_cancel),
+            MessageHandler(filters.COMMAND, fallback_command),
+        ],
     )

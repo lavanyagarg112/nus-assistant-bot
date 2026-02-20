@@ -12,7 +12,7 @@ from telegram.ext import (
 
 from bot import keyboards
 from bot.handlers.assignments import _escape_md, _truncate_message
-from bot.utils import reply, reply_or_edit
+from bot.utils import fallback_command, reply, reply_or_edit
 from canvas import client as canvas
 from db import models
 
@@ -283,6 +283,7 @@ def get_add_todo_handler() -> ConversationHandler:
         },
         fallbacks=[
             CommandHandler("cancel", add_todo_cancel),
+            MessageHandler(filters.COMMAND, fallback_command),
         ],
         per_message=False,
     )
