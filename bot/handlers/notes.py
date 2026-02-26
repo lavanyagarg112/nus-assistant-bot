@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 
 from telegram import Update
 from telegram.ext import (
@@ -18,6 +19,8 @@ from canvas import client as canvas
 from db import models
 
 logger = logging.getLogger(__name__)
+
+SGT = timezone(timedelta(hours=8))
 
 WAITING_NOTE = 0
 CAPTURING_QUICKNOTE = 1
@@ -123,7 +126,9 @@ async def _format_notes(
     if general_notes:
         lines.append("*General Notes*")
         for n in general_notes:
-            lines.append(f"_{_escape_md(n['created_at'])}_")
+            created_utc = datetime.fromisoformat(n['created_at']).replace(tzinfo=timezone.utc)
+            created_sgt = created_utc.astimezone(SGT).strftime('%d %b %Y %H:%M') + " SGT"
+            lines.append(f"_{_escape_md(created_sgt)}_")
             lines.append(f"{_escape_md(n['content'])}\n")
 
     # Truncate if too long for Telegram

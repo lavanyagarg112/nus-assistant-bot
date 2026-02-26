@@ -1,6 +1,6 @@
 # NUS Assistant Bot
 
-A Telegram bot that helps NUS students manage their Canvas LMS assignments, quizzes, files, and deadlines — all from Telegram.
+A Telegram bot that helps NUS students manage their Canvas LMS assignments, quizzes, files, and deadlines — all from Telegram. Canvas API tokens are encrypted at rest using Azure Key Vault envelope encryption.
 
 ## Use the Bot
 
@@ -64,16 +64,19 @@ Edit `.env` and fill in:
 | Variable | Description |
 |----------|-------------|
 | `TELEGRAM_BOT_TOKEN` | From [@BotFather](https://t.me/BotFather) |
-| `FERNET_KEY` | Encryption key for Canvas tokens (see below) |
+| `FERNET_KEY` | Encryption key for notes, todos, and tokens (see below) |
 | `CANVAS_BASE_URL` | Your Canvas instance URL (default: `https://canvas.nus.edu.sg`) |
 | `ADMIN_TELEGRAM_ID` | *(Optional)* Your Telegram user ID for admin commands |
 | `ADMIN_PASSWORD` | *(Optional)* Password required for admin commands |
+| `KEYVAULT_KEK_ID` | *(Optional)* Azure Key Vault key URI for token encryption (see [Azure Key Vault](#azure-key-vault-optional)) |
 
 Generate a Fernet key:
 
 ```bash
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
+
+That's it — `FERNET_KEY` is the only encryption key you need for local use. All data (tokens, notes, todos) will be encrypted with Fernet.
 
 ### 3. Run
 
@@ -88,6 +91,7 @@ The bot will initialise the SQLite database on first run and start polling for m
 ```
 ├── main.py                  # Entry point, handler registration, reminder jobs
 ├── config.py                # Environment variable loading and validation
+├── azure_migration.py       # One-time migration: Fernet tokens → Azure Key Vault
 ├── bot/
 │   ├── keyboards.py         # Inline keyboard builders
 │   └── handlers/
@@ -107,11 +111,24 @@ The bot will initialise the SQLite database on first run and start polling for m
 └── .env.example
 ```
 
+### Azure Key Vault (Optional)
+
+For production deployments, you can use Azure Key Vault to protect Canvas API tokens with envelope encryption. This is optional — without it, tokens are encrypted with Fernet.
+
+1. Create an RSA key in your Azure Key Vault
+2. Grant the VM's managed identity the **Key Vault Crypto User** role
+3. Set `KEYVAULT_KEK_ID` in `.env` to the full key URI (e.g. `https://<vault>.vault.azure.net/keys/<key-name>/<version>`)
+4. Run `python azure_migration.py` to migrate existing Fernet-encrypted tokens to the new format
+5. Restart the bot
+
+When `KEYVAULT_KEK_ID` is set, new tokens are encrypted via Key Vault. Notes and todos remain Fernet-encrypted. If `KEYVAULT_KEK_ID` is not set, everything uses Fernet as before.
+
 ### Key Details
 
 - **Database** — SQLite with WAL mode, stored as `bot.db` by default
-- **Token storage** — Canvas API tokens are encrypted at rest using Fernet
+- **Encryption** — Canvas API tokens are encrypted at rest using either Fernet (default) or Azure Key Vault envelope encryption (if configured). Notes and todos are always Fernet-encrypted
 - **Token renewal** — If your Canvas token expires, every command will tell you to run `/setup` to add a new one. Running `/setup` again replaces only the token — all your notes, todos, and settings are kept
+- **Timezones** — All times are displayed in SGT (UTC+8)
 - **Submission status** — Assignment submission detection uses `submission.attempt` to avoid false positives from instructor-graded items with no actual student submission
 - **Item type markers** — `[A]` = Assignment, `[Q]` = Quiz. Shown in course item lists, detail views, and the `/due` deadline list so you can tell them apart at a glance
 - **Reminders** — Users set their preferred hour (SGT) via `/reminder` and get a daily push with deadlines due in the next 48 hours. Expired tokens are detected and the user is notified

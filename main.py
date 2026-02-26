@@ -102,7 +102,7 @@ async def hourly_reminder(context) -> None:
                 url = canvas.assignment_url(course_id, a["id"])
             name = _html_escape(a["name"])
             lines.append(f'- {tag}<a href="{url}">{name}</a> ({course})')
-            lines.append(f"  Due: {due_dt.strftime('%d %b %H:%M')}\n")
+            lines.append(f"  Due: {due_dt.astimezone(SGT).strftime('%d %b %H:%M')} SGT\n")
 
         msg = await context.bot.send_message(
             chat_id=telegram_id,

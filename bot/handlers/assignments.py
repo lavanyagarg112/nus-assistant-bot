@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from telegram import InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
@@ -12,6 +12,8 @@ from canvas.client import CanvasTokenError
 from db import models
 
 logger = logging.getLogger(__name__)
+
+SGT = timezone(timedelta(hours=8))
 
 TOKEN_EXPIRED_MSG = "Your Canvas token has expired or is invalid.\nRun /setup to add a new one (your notes, todos, etc. will be kept)."
 
@@ -38,19 +40,19 @@ async def _require_token(update: Update, context: ContextTypes.DEFAULT_TYPE = No
 def _format_due(due_str: str | None) -> str:
     if not due_str:
         return "No due date"
-    dt = datetime.fromisoformat(due_str.replace("Z", "+00:00"))
-    now = datetime.now(timezone.utc)
+    dt = datetime.fromisoformat(due_str.replace("Z", "+00:00")).astimezone(SGT)
+    now = datetime.now(SGT)
     diff = dt - now
     days = diff.days
     if days < 0:
-        return f"OVERDUE ({dt.strftime('%d %b %H:%M')})"
+        return f"OVERDUE ({dt.strftime('%d %b %H:%M')} SGT)"
     if days == 0:
         total_mins = int(diff.total_seconds() // 60)
         if total_mins < 60:
-            return f"Due in {total_mins}m ({dt.strftime('%H:%M')})"
+            return f"Due in {total_mins}m ({dt.strftime('%H:%M')} SGT)"
         hours = total_mins // 60
-        return f"Due in {hours}h ({dt.strftime('%H:%M')})"
-    return f"Due in {days}d ({dt.strftime('%d %b %H:%M')})"
+        return f"Due in {hours}h ({dt.strftime('%H:%M')} SGT)"
+    return f"Due in {days}d ({dt.strftime('%d %b %H:%M')} SGT)"
 
 
 # ── /assignments command ──
