@@ -3,13 +3,16 @@ import base64
 import secrets
 import sqlite3
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from azure.identity import DefaultAzureCredential
 from azure.keyvault.keys.crypto import CryptographyClient, KeyWrapAlgorithm
 
-DB_PATH = os.environ.get("DB_PATH", "yourdb.sqlite")
+DB_PATH = os.environ.get("DB_PATH", "bot.db")
 FERNET_KEY = os.environ["FERNET_KEY"]
 KEYVAULT_KEK_ID = os.environ["KEYVAULT_KEK_ID"]
 
