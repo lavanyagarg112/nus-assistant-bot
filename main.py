@@ -41,6 +41,7 @@ async def post_init(application: Application) -> None:
 
 
 async def post_shutdown(application: Application) -> None:
+    await models.close_crypto_client()
     await close_db()
     logger.info("Database connection closed")
 

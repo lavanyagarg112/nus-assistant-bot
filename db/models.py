@@ -1,12 +1,84 @@
+import base64
 import logging
+import secrets
 
 from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import config
 from db.database import get_db
 
 logger = logging.getLogger(__name__)
 
 _fernet = Fernet(config.FERNET_KEY.encode())
+
+# ── Azure Key Vault envelope encryption (lazy singleton) ──
+
+_crypto_client = None
+_azure_credential = None
+
+
+def _get_crypto_client():
+    """Lazy-init the Azure CryptographyClient (async, for wrapping DEKs)."""
+    global _crypto_client, _azure_credential
+    if _crypto_client is None:
+        from azure.identity.aio import DefaultAzureCredential
+        from azure.keyvault.keys.crypto.aio import CryptographyClient
+
+        _azure_credential = DefaultAzureCredential()
+        _crypto_client = CryptographyClient(
+            key=config.KEYVAULT_KEK_ID,
+            credential=_azure_credential,
+        )
+    return _crypto_client
+
+
+async def _encrypt_token(plaintext: str) -> tuple[str, str, str]:
+    """Envelope-encrypt a Canvas token using AES-GCM + Azure KV key-wrapping.
+
+    Returns (ciphertext_b64, nonce_b64, wrapped_dek_b64).
+    """
+    from azure.keyvault.keys.crypto import KeyWrapAlgorithm
+
+    dek = secrets.token_bytes(32)  # AES-256
+    nonce = secrets.token_bytes(12)  # GCM nonce
+    ct = AESGCM(dek).encrypt(nonce, plaintext.encode("utf-8"), None)
+
+    client = _get_crypto_client()
+    result = await client.wrap_key(KeyWrapAlgorithm.rsa_oaep, dek)
+
+    return (
+        base64.b64encode(ct).decode(),
+        base64.b64encode(nonce).decode(),
+        base64.b64encode(result.encrypted_key).decode(),
+    )
+
+
+async def _decrypt_token(ct_b64: str, nonce_b64: str, wrapped_b64: str) -> str:
+    """Unwrap DEK via Azure KV, then AES-GCM decrypt the Canvas token."""
+    from azure.keyvault.keys.crypto import KeyWrapAlgorithm
+
+    client = _get_crypto_client()
+    unwrap_result = await client.unwrap_key(
+        KeyWrapAlgorithm.rsa_oaep,
+        base64.b64decode(wrapped_b64),
+    )
+    dek = unwrap_result.key
+
+    ct = base64.b64decode(ct_b64)
+    nonce = base64.b64decode(nonce_b64)
+    plaintext = AESGCM(dek).decrypt(nonce, ct, None)
+    return plaintext.decode("utf-8")
+
+
+async def close_crypto_client() -> None:
+    """Close the Azure CryptographyClient and credential (call on shutdown)."""
+    global _crypto_client, _azure_credential
+    if _crypto_client is not None:
+        await _crypto_client.close()
+        _crypto_client = None
+    if _azure_credential is not None:
+        await _azure_credential.close()
+        _azure_credential = None
 
 
 def _encrypt(plaintext: str) -> str:
@@ -22,26 +94,49 @@ def _decrypt(ciphertext: str) -> str:
 
 async def upsert_user(telegram_id: int, canvas_token: str) -> None:
     db = await get_db()
-    await db.execute(
-        """
-        INSERT INTO users (telegram_id, canvas_token_encrypted)
-        VALUES (?, ?)
-        ON CONFLICT(telegram_id) DO UPDATE SET canvas_token_encrypted = excluded.canvas_token_encrypted
-        """,
-        (telegram_id, _encrypt(canvas_token)),
-    )
+    if config.KEYVAULT_KEK_ID:
+        ct_b64, nonce_b64, wrapped_b64 = await _encrypt_token(canvas_token)
+        await db.execute(
+            """
+            INSERT INTO users (telegram_id, canvas_token_encrypted,
+                               canvas_token_ciphertext_b64, canvas_token_nonce_b64, canvas_token_wrapped_dek_b64)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(telegram_id) DO UPDATE SET
+                canvas_token_encrypted = excluded.canvas_token_encrypted,
+                canvas_token_ciphertext_b64 = excluded.canvas_token_ciphertext_b64,
+                canvas_token_nonce_b64 = excluded.canvas_token_nonce_b64,
+                canvas_token_wrapped_dek_b64 = excluded.canvas_token_wrapped_dek_b64
+            """,
+            (telegram_id, "AKV", ct_b64, nonce_b64, wrapped_b64),
+        )
+    else:
+        await db.execute(
+            """
+            INSERT INTO users (telegram_id, canvas_token_encrypted)
+            VALUES (?, ?)
+            ON CONFLICT(telegram_id) DO UPDATE SET canvas_token_encrypted = excluded.canvas_token_encrypted
+            """,
+            (telegram_id, _encrypt(canvas_token)),
+        )
     await db.commit()
 
 
 async def get_canvas_token(telegram_id: int) -> str | None:
     db = await get_db()
     row = await db.execute_fetchall(
-        "SELECT canvas_token_encrypted FROM users WHERE telegram_id = ?",
+        """SELECT canvas_token_encrypted,
+                  canvas_token_ciphertext_b64, canvas_token_nonce_b64, canvas_token_wrapped_dek_b64
+           FROM users WHERE telegram_id = ?""",
         (telegram_id,),
     )
     if not row:
         return None
-    return _decrypt(row[0][0])
+    legacy, ct_b64, nonce_b64, wrapped_b64 = row[0]
+    # Prefer Azure KV columns if populated and Key Vault is configured
+    if config.KEYVAULT_KEK_ID and ct_b64 and nonce_b64 and wrapped_b64:
+        return await _decrypt_token(ct_b64, nonce_b64, wrapped_b64)
+    # Fall back to Fernet (unmigrated users or local dev without KEYVAULT_KEK_ID)
+    return _decrypt(legacy)
 
 
 async def delete_user(telegram_id: int) -> None:
@@ -294,18 +389,9 @@ async def migrate_encrypt_legacy_rows() -> dict:
     Returns a dict with counts of migrated rows per table.
     """
     db = await get_db()
-    migrated = {"users": 0, "notes": 0, "general_notes": 0, "todos": 0}
+    migrated = {"notes": 0, "general_notes": 0, "todos": 0}
 
-    # ── users.canvas_token_encrypted ──
-    rows = await db.execute_fetchall("SELECT telegram_id, canvas_token_encrypted FROM users")
-    for r in rows:
-        tid, val = r[0], r[1]
-        if not _is_encrypted(val):
-            await db.execute(
-                "UPDATE users SET canvas_token_encrypted = ? WHERE telegram_id = ?",
-                (_encrypt(val), tid),
-            )
-            migrated["users"] += 1
+    # users.canvas_token_encrypted — skipped; handled by azure_migration.py
 
     # ── notes.note_text ──
     rows = await db.execute_fetchall("SELECT id, note_text FROM notes")

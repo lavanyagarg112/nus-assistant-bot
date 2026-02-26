@@ -72,6 +72,19 @@ async def init_db() -> None:
     ]
     for stmt in statements:
         await db.execute(stmt)
+
+    # Azure Key Vault envelope-encryption columns
+    for col in (
+        "canvas_token_ciphertext_b64 TEXT",
+        "canvas_token_nonce_b64 TEXT",
+        "canvas_token_wrapped_dek_b64 TEXT",
+    ):
+        try:
+            await db.execute(f"ALTER TABLE users ADD COLUMN {col}")
+        except Exception as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
+
     await db.commit()
 
 
