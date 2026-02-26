@@ -3,6 +3,7 @@
 __pycache__/
 *.pyc
 *.db
+*.db.bak
 *.db-shm
 *.db-wal
 .venv/
