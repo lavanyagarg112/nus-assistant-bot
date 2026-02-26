@@ -201,7 +201,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             f"Daily reminder: {reminder_str}\n\n"
             "/unlink — Remove your Canvas account\n"
             "/reminder <hour> — Change reminder time (0-23)\n"
-            "/refresh — Refresh cached course data"
+            "/refresh — Refresh cached course list"
         )
     else:
         text = (

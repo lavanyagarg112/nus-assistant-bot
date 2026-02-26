@@ -34,7 +34,7 @@ HELP_MSG = (
     "/unlink — Remove your Canvas account\n"
     "/reminder \\[hour\\] — Set daily reminder time \\(SGT\\)\n"
     "  _Sends a push at that hour with deadlines due in the next 48h\\. Default: 9:00 AM_\n"
-    "/refresh — Refresh cached course data from Canvas\n"
+    "/refresh — Refresh cached course list from Canvas\n"
     "\n"
     "🔧 *General*\n"
     "/menu — Main menu\n"
