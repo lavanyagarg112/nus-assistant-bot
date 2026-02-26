@@ -1,3 +1,4 @@
+aiohttp
 aiosqlite==0.22.1
 azure-identity
 azure-keyvault-keys
