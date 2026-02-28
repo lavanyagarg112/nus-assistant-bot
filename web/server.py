@@ -76,7 +76,7 @@ _LINK_PAGE = """\
 <div class="card">
   <h1>Link Your Canvas Account</h1>
   <p class="desc">Paste your Canvas API token below. It will be sent directly to the bot server over HTTPS — never through Telegram.</p>
-  <form id="f" onsubmit="return submit(event)">
+  <form id="f" onsubmit="return handleSubmit(event)">
     <input type="hidden" name="otp" value="%(otp)s">
     <label for="token">Canvas API Token</label>
     <input type="text" id="token" name="token" autocomplete="off" placeholder="Paste your token here" required>
@@ -86,7 +86,7 @@ _LINK_PAGE = """\
   <p class="note">Your token is encrypted at rest and used only to fetch your Canvas data. You can revoke it anytime from Canvas settings or by running /unlink in the bot.</p>
 </div>
 <script>
-async function submit(e) {
+async function handleSubmit(e) {
   e.preventDefault();
   const btn = document.getElementById('btn');
   const msg = document.getElementById('msg');
