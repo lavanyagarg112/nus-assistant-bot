@@ -4,28 +4,24 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     CommandHandler,
     ContextTypes,
-    ConversationHandler,
-    MessageHandler,
-    filters,
 )
 
+import config
 from bot import keyboards
-from bot.utils import make_fallback_command, reply, reply_or_edit, send
+from bot.utils import check_migration_reminder, reply, reply_or_edit
 from canvas import client as canvas
 from db import models
 
 logger = logging.getLogger(__name__)
 
-WAITING_TOKEN = 0
 
-
-async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def setup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_chat.type != "private":
         await reply(
             update.message, context,
             "For security, /setup can only be used in a private chat with me."
         )
-        return ConversationHandler.END
+        return
 
     telegram_id = update.effective_user.id
     existing_token = await models.get_canvas_token(telegram_id)
@@ -33,83 +29,42 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     if existing_token:
         prompt = (
             "You already have a Canvas account linked.\n"
-            "If your token expired, you can paste a new one now to update it. "
+            "If your token expired, you can link a new one to update it. "
             "Your notes, todos, and other data will be kept.\n\n"
         )
     else:
         prompt = "Let's link your Canvas account.\n\n"
 
-    await reply(
-        update.message, context,
-        f"{prompt}"
+    instructions = (
         "To get your Canvas API token:\n"
         "1. Go to https://canvas.nus.edu.sg\n"
         "2. Click your profile icon -> Settings\n"
         "3. Scroll to Approved Integrations -> + New Access Token\n"
         "4. Set an expiry date for the token (recommended for security)\n"
         "5. Copy the token\n\n"
-        "🔒 Security tips:\n"
-        "• Your token is stored encrypted — never in plain text\n"
-        "• Always set a token expiry — avoid tokens that never expire\n"
-        "• You can update your token anytime by running /setup again\n"
-        "• Use /unlink to remove your token and all data at any time\n\n"
-        "Please paste your Canvas API token now.\n"
-        "(Your message will be deleted for security)\n\n"
-        "Send /cancel to abort."
+        "Security tips:\n"
+        "- Your token is stored encrypted — never in plain text\n"
+        "- Always set a token expiry — avoid tokens that never expire\n"
+        "- You can update your token anytime by running /setup again\n"
+        "- Use /unlink to remove your token and all data at any time\n"
     )
-    return WAITING_TOKEN
 
-
-async def setup_receive_token(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    token = update.message.text.strip()
-    telegram_id = update.effective_user.id
-
-    # Delete the message containing the token for security
-    try:
-        await update.message.delete()
-    except Exception:
-        logger.warning("Could not delete token message for user %s", telegram_id)
-        await send(
-            update.effective_chat, context,
-            "I couldn't delete your token message. Please delete it manually for security."
+    if config.WEB_BASE_URL:
+        from web.server import generate_otp
+        otp = generate_otp(telegram_id)
+        link = f"{config.WEB_BASE_URL}/link?token={otp}"
+        await reply(
+            update.message, context,
+            f"{prompt}{instructions}\n"
+            f"Open this link to paste your token securely (expires in 5 min):\n{link}\n\n"
+            "Your token never passes through Telegram — it goes directly from your browser to the bot server over HTTPS."
         )
-
-    if not token or len(token) < 10:
-        await send(
-            update.effective_chat, context,
-            "That doesn't look like a valid token. Please try /setup again."
+    else:
+        await reply(
+            update.message, context,
+            f"{prompt}{instructions}\n"
+            "Web-based token setup is not configured. Please contact the bot administrator."
         )
-        return ConversationHandler.END
-
-    # Validate the token by making a test API call
-    await send(update.effective_chat, context, "Verifying your token...")
-    try:
-        courses = await canvas.get_courses(token)
-    except Exception:
-        logger.warning("Token validation failed for user %s", telegram_id)
-        await send(
-            update.effective_chat, context,
-            "That token doesn't seem to work. Please check it and try /setup again."
-        )
-        return ConversationHandler.END
-
-    await models.upsert_user(telegram_id, token)
-    # Clear any stale course cache from old token
-    canvas.clear_course_cache(token)
-    await send(
-        update.effective_chat, context,
-        f"Canvas token verified and saved! Found {len(courses)} active course(s).\n\n"
-        "Try /assignments or /due to see your assignments.\n\n"
-        "🔒 Remember:\n"
-        "• /setup — replace your token anytime\n"
-        "• /unlink — remove your token & all data"
-    )
-    return ConversationHandler.END
-
-
-async def setup_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await reply(update.message, context, "Setup cancelled.")
-    return ConversationHandler.END
 
 
 async def unlink_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -155,6 +110,9 @@ async def reminder_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await reply(update.message, context, "You need to /setup first.")
         return
 
+    if await check_migration_reminder(update, context):
+        return
+
     if not context.args:
         await reply(
             update.message, context,
@@ -182,6 +140,8 @@ async def refresh_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not token:
         await reply(update.message, context, "You need to /setup first.")
         return
+    if await check_migration_reminder(update, context):
+        return
     canvas.clear_course_cache(token)
     await reply(update.message, context, "Course cache cleared. Your next request will fetch fresh data from Canvas.")
 
@@ -193,6 +153,8 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     registered = await models.is_registered(telegram_id)
 
     if registered:
+        if await check_migration_reminder(update, context):
+            return
         reminder_hour = await models.get_reminder_hour(telegram_id)
         reminder_str = f"{reminder_hour}:00 SGT" if reminder_hour is not None else "Not set"
         text = (
@@ -213,16 +175,5 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await reply_or_edit(query, context, text, reply_markup=keyboards.back_to_menu())
 
 
-def get_setup_handler() -> ConversationHandler:
-    return ConversationHandler(
-        entry_points=[CommandHandler("setup", setup_start)],
-        states={
-            WAITING_TOKEN: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, setup_receive_token)
-            ],
-        },
-        fallbacks=[
-            CommandHandler("cancel", setup_cancel),
-            MessageHandler(filters.COMMAND, make_fallback_command("setup")),
-        ],
-    )
+def get_setup_handler() -> CommandHandler:
+    return CommandHandler("setup", setup_cmd)

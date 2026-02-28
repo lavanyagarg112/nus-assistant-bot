@@ -73,11 +73,12 @@ async def init_db() -> None:
     for stmt in statements:
         await db.execute(stmt)
 
-    # Azure Key Vault envelope-encryption columns
+    # Idempotent column additions
     for col in (
         "canvas_token_ciphertext_b64 TEXT",
         "canvas_token_nonce_b64 TEXT",
         "canvas_token_wrapped_dek_b64 TEXT",
+        "token_source TEXT",
     ):
         try:
             await db.execute(f"ALTER TABLE users ADD COLUMN {col}")

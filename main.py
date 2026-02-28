@@ -23,6 +23,8 @@ logging.basicConfig(
 )
 # Suppress httpx request logging — it leaks the bot token in URLs
 logging.getLogger("httpx").setLevel(logging.WARNING)
+# Suppress python-telegram-bot debug logging — it can log Update objects containing user messages
+logging.getLogger("telegram").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +41,24 @@ async def post_init(application: Application) -> None:
     logger.info("Database initialized")
     await models.migrate_encrypt_legacy_rows()
 
+    if config.WEB_BASE_URL:
+        from aiohttp import web as aio_web
+        from web.server import create_web_app
+
+        web_app = create_web_app(application)
+        runner = aio_web.AppRunner(web_app)
+        await runner.setup()
+        site = aio_web.TCPSite(runner, "127.0.0.1", config.WEB_PORT)
+        await site.start()
+        application.bot_data["_web_runner"] = runner
+        logger.info("Web server started on port %s", config.WEB_PORT)
+
 
 async def post_shutdown(application: Application) -> None:
+    runner = application.bot_data.get("_web_runner")
+    if runner:
+        await runner.cleanup()
+        logger.info("Web server stopped")
     await models.close_crypto_client()
     await close_db()
     logger.info("Database connection closed")
@@ -48,7 +66,8 @@ async def post_shutdown(application: Application) -> None:
 
 async def error_handler(update: object, context) -> None:
     """Global error handler — log the error and notify the user if possible."""
-    logger.error("Unhandled exception:", exc_info=context.error)
+    err = context.error
+    logger.error("Unhandled exception: %s: %s", type(err).__name__, err)
 
     if update and hasattr(update, "effective_chat") and update.effective_chat:
         try:
@@ -133,7 +152,6 @@ def main() -> None:
     )
 
     # ConversationHandlers (must be added before generic callback handlers)
-    app.add_handler(settings.get_setup_handler())
     app.add_handler(notes.get_quicknote_handler())
     app.add_handler(notes.get_search_handler())
     app.add_handler(notes.get_note_handler())
@@ -141,6 +159,7 @@ def main() -> None:
     app.add_handler(admin.get_broadcast_handler())
 
     # Command handlers
+    app.add_handler(settings.get_setup_handler())
     app.add_handler(CommandHandler("start", start.start))
     app.add_handler(CommandHandler("cancel", start.cancel_cmd))
     app.add_handler(CommandHandler("help", start.help_cmd))

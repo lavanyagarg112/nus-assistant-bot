@@ -14,7 +14,7 @@ from telegram.ext import (
 
 from bot import keyboards
 from bot.handlers.assignments import _escape_md, _require_token, _truncate_message
-from bot.utils import make_fallback_command, reply, reply_or_edit
+from bot.utils import check_migration_reminder, make_fallback_command, reply, reply_or_edit
 from canvas import client as canvas
 from db import models
 
@@ -285,6 +285,9 @@ async def notes_search_receive(update: Update, context: ContextTypes.DEFAULT_TYP
         await reply(update.message, context, "You need to /setup first.", reply_markup=keyboards.back_to_menu())
         return ConversationHandler.END
 
+    if await check_migration_reminder(update, context):
+        return ConversationHandler.END
+
     assignment_notes, general_notes = await models.search_notes(user_id, query_text)
 
     if not assignment_notes and not general_notes:
@@ -327,6 +330,8 @@ async def start_notes_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     registered = await models.is_registered(update.effective_user.id)
     if not registered:
         await reply(update.message, context, "You need to /setup first before using notes.")
+        return ConversationHandler.END
+    if await check_migration_reminder(update, context):
         return ConversationHandler.END
     context.user_data["quicknote_lines"] = []
     await reply(

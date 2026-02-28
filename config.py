@@ -13,6 +13,8 @@ _admin_id = os.getenv("ADMIN_TELEGRAM_ID")
 ADMIN_TELEGRAM_ID = int(_admin_id) if _admin_id else None
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
 KEYVAULT_KEK_ID = os.getenv("KEYVAULT_KEK_ID")
+WEB_BASE_URL = os.getenv("WEB_BASE_URL", "").rstrip("/")
+WEB_PORT = int(os.getenv("WEB_PORT", "8080"))
 
 # ── Startup validations ──
 

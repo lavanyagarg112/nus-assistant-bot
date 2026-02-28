@@ -6,7 +6,7 @@ from telegram import InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from bot import keyboards
-from bot.utils import breadcrumb, reply, reply_or_edit
+from bot.utils import breadcrumb, check_migration_reminder, reply, reply_or_edit
 from canvas import client as canvas
 from canvas.client import CanvasTokenError
 from db import models
@@ -34,6 +34,11 @@ async def _require_token(update: Update, context: ContextTypes.DEFAULT_TYPE = No
                 await reply(update.message, context, text, reply_markup=keyboards.back_to_menu())
             else:
                 await update.message.reply_text(text, reply_markup=keyboards.back_to_menu())
+        return token
+
+    if context and await check_migration_reminder(update, context):
+        return None
+
     return token
 
 

@@ -55,3 +55,29 @@ async def reply_or_edit(query, context: ContextTypes.DEFAULT_TYPE, text: str, **
     msg = await query.message.reply_text(text, **kwargs)
     _track(context, msg)
     return msg
+
+
+async def check_migration_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Block legacy users who linked via Telegram until they re-link via the web flow.
+
+    Returns True if the user is blocked (legacy token), False if OK to proceed.
+    """
+    from config import WEB_BASE_URL
+    if not WEB_BASE_URL:
+        return False
+    from db.models import get_token_source
+    user_id = update.effective_user.id
+    source = await get_token_source(user_id)
+    if source is not None:
+        return False
+    text = (
+        "Security update: Your Canvas token was set up via Telegram, which is "
+        "no longer supported. Please re-link your account via /setup — your "
+        "token will go directly to the server over HTTPS, never through Telegram.\n\n"
+        "Your notes, todos, and other data will not be deleted."
+    )
+    if update.callback_query:
+        await reply_or_edit(update.callback_query, context, text)
+    elif update.message:
+        await reply(update.message, context, text)
+    return True

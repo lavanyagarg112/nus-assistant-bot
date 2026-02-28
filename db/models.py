@@ -92,31 +92,35 @@ def _decrypt(ciphertext: str) -> str:
 # ── User CRUD ──
 
 
-async def upsert_user(telegram_id: int, canvas_token: str) -> None:
+async def upsert_user(telegram_id: int, canvas_token: str, token_source: str | None = None) -> None:
     db = await get_db()
     if config.KEYVAULT_KEK_ID:
         ct_b64, nonce_b64, wrapped_b64 = await _encrypt_token(canvas_token)
         await db.execute(
             """
             INSERT INTO users (telegram_id, canvas_token_encrypted,
-                               canvas_token_ciphertext_b64, canvas_token_nonce_b64, canvas_token_wrapped_dek_b64)
-            VALUES (?, ?, ?, ?, ?)
+                               canvas_token_ciphertext_b64, canvas_token_nonce_b64, canvas_token_wrapped_dek_b64,
+                               token_source)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(telegram_id) DO UPDATE SET
                 canvas_token_encrypted = excluded.canvas_token_encrypted,
                 canvas_token_ciphertext_b64 = excluded.canvas_token_ciphertext_b64,
                 canvas_token_nonce_b64 = excluded.canvas_token_nonce_b64,
-                canvas_token_wrapped_dek_b64 = excluded.canvas_token_wrapped_dek_b64
+                canvas_token_wrapped_dek_b64 = excluded.canvas_token_wrapped_dek_b64,
+                token_source = excluded.token_source
             """,
-            (telegram_id, "AKV", ct_b64, nonce_b64, wrapped_b64),
+            (telegram_id, "AKV", ct_b64, nonce_b64, wrapped_b64, token_source),
         )
     else:
         await db.execute(
             """
-            INSERT INTO users (telegram_id, canvas_token_encrypted)
-            VALUES (?, ?)
-            ON CONFLICT(telegram_id) DO UPDATE SET canvas_token_encrypted = excluded.canvas_token_encrypted
+            INSERT INTO users (telegram_id, canvas_token_encrypted, token_source)
+            VALUES (?, ?, ?)
+            ON CONFLICT(telegram_id) DO UPDATE SET
+                canvas_token_encrypted = excluded.canvas_token_encrypted,
+                token_source = excluded.token_source
             """,
-            (telegram_id, _encrypt(canvas_token)),
+            (telegram_id, _encrypt(canvas_token), token_source),
         )
     await db.commit()
 
@@ -185,6 +189,18 @@ async def is_registered(telegram_id: int) -> bool:
         "SELECT 1 FROM users WHERE telegram_id = ?", (telegram_id,)
     )
     return len(row) > 0
+
+
+async def get_token_source(telegram_id: int) -> str | None:
+    """Return 'web' if the user linked via the web flow, or None (legacy)."""
+    db = await get_db()
+    rows = await db.execute_fetchall(
+        "SELECT token_source FROM users WHERE telegram_id = ?",
+        (telegram_id,),
+    )
+    if not rows:
+        return None
+    return rows[0][0]
 
 
 # ── Notes CRUD ──

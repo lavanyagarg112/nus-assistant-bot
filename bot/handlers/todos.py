@@ -12,7 +12,7 @@ from telegram.ext import (
 
 from bot import keyboards
 from bot.handlers.assignments import _escape_md, _truncate_message, TOKEN_EXPIRED_MSG
-from bot.utils import make_fallback_command, reply, reply_or_edit
+from bot.utils import check_migration_reminder, make_fallback_command, reply, reply_or_edit
 from canvas.client import CanvasTokenError
 from canvas import client as canvas
 from db import models
@@ -30,6 +30,9 @@ async def todos_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     registered = await models.is_registered(telegram_id)
     if not registered:
         await reply(update.message, context, "You need to /setup first.")
+        return
+
+    if await check_migration_reminder(update, context):
         return
 
     show_done = context.args and context.args[0] == "all"
@@ -200,6 +203,9 @@ async def add_todo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     token = await models.get_canvas_token(telegram_id)
     if not token:
         await reply(update.message, context, "You need to /setup first.")
+        return
+
+    if await check_migration_reminder(update, context):
         return
 
     try:
