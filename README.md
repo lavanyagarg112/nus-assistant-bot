@@ -69,8 +69,10 @@ Edit `.env` and fill in:
 | `ADMIN_TELEGRAM_ID` | *(Optional)* Your Telegram user ID for admin commands |
 | `ADMIN_PASSWORD` | *(Optional)* Password required for admin commands |
 | `KEYVAULT_KEK_ID` | *(Optional)* Azure Key Vault key URI for token encryption (see [Azure Key Vault](#azure-key-vault-optional)) |
-| `WEB_BASE_URL` | *(Optional)* Public URL for the web-based token setup page (e.g. `https://yourbot.example.com`). Enables secure token linking via HTTPS instead of Telegram |
-| `WEB_PORT` | *(Optional)* Port for the web server (default: `8080`). Runs behind a reverse proxy (nginx) |
+| `IS_SELF_HOSTED` | Set to `True` for self-hosted deployments (default: `False`) |
+| `CANVAS_TOKEN` | *(Self-hosted only)* Your Canvas API token — `/setup` will use this directly |
+| `WEB_BASE_URL` | *(Production only)* Public URL for the web-based token setup page (e.g. `https://yourbot.example.com`) |
+| `WEB_PORT` | *(Production only)* Port for the web server (default: `8080`). Runs behind a reverse proxy (nginx) |
 
 Generate a Fernet key:
 
@@ -79,6 +81,8 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 ```
 
 That's it — `FERNET_KEY` is the only encryption key you need for local use. All data (tokens, notes, todos) will be encrypted with Fernet.
+
+For self-hosted use, set `IS_SELF_HOSTED=True` and `CANVAS_TOKEN` to your Canvas API token. Run `/setup` in the bot and it will link your token directly from the `.env` — no web server needed.
 
 ### 3. Run
 
@@ -131,7 +135,7 @@ When `KEYVAULT_KEK_ID` is set, new tokens are encrypted via Key Vault. Notes and
 
 - **Database** — SQLite with WAL mode, stored as `bot.db` by default
 - **Encryption** — Canvas API tokens are encrypted at rest using either Fernet (default) or Azure Key Vault envelope encryption (if configured). Notes and todos are always Fernet-encrypted
-- **Token setup** — Tokens are linked via a web page served over HTTPS, so they never pass through Telegram. If `WEB_BASE_URL` is set, `/setup` generates a single-use link (expires in 5 minutes) to a token submission form. Requires a reverse proxy (e.g. nginx) for TLS termination
+- **Token setup** — In production (`WEB_BASE_URL` set), tokens are linked via a web page served over HTTPS, so they never pass through Telegram. `/setup` generates a single-use link (expires in 5 minutes) to a token submission form. Requires a reverse proxy (e.g. nginx) for TLS termination. For self-hosted use (`IS_SELF_HOSTED=True`), the token is read directly from `CANVAS_TOKEN` in `.env`
 - **Token renewal** — If your Canvas token expires, every command will tell you to run `/setup` to add a new one. Running `/setup` again replaces only the token — all your notes, todos, and settings are kept
 - **Timezones** — All times are displayed in SGT (UTC+8)
 - **Submission status** — Assignment submission detection uses `submission.attempt` to avoid false positives from instructor-graded items with no actual student submission
