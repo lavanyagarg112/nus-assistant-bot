@@ -71,10 +71,11 @@ async def check_migration_reminder(update: Update, context: ContextTypes.DEFAULT
     if source is not None:
         return False
     text = (
-        "Security update: Your Canvas token was set up via Telegram, which is "
-        "no longer supported. Please re-link your account via /setup — your "
-        "token will go directly to the server over HTTPS, never through Telegram.\n\n"
-        "Your notes, todos, and other data will not be deleted."
+        "Update: Token setup via Telegram is no longer supported. "
+        "For your token security, please generate a new token on Canvas "
+        "and delete the previous one. Then run /setup to link the new token "
+        "— it will go directly to the server over HTTPS, never through Telegram.\n\n"
+        "Your notes, todos, and other data will be retained."
     )
     if update.callback_query:
         await reply_or_edit(update.callback_query, context, text)
