@@ -15,6 +15,8 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
 KEYVAULT_KEK_ID = os.getenv("KEYVAULT_KEK_ID")
 WEB_BASE_URL = os.getenv("WEB_BASE_URL", "").rstrip("/")
 WEB_PORT = int(os.getenv("WEB_PORT", "8080"))
+CANVAS_TOKEN = os.getenv("CANVAS_TOKEN")
+IS_SELF_HOSTED = os.getenv("IS_SELF_HOSTED", "false").lower() == "true"
 
 # ── Startup validations ──
 

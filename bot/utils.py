@@ -62,8 +62,8 @@ async def check_migration_reminder(update: Update, context: ContextTypes.DEFAULT
 
     Returns True if the user is blocked (legacy token), False if OK to proceed.
     """
-    from config import WEB_BASE_URL
-    if not WEB_BASE_URL:
+    from config import IS_SELF_HOSTED, WEB_BASE_URL
+    if IS_SELF_HOSTED or not WEB_BASE_URL:
         return False
     from db.models import get_token_source
     user_id = update.effective_user.id

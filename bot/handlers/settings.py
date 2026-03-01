@@ -60,11 +60,31 @@ async def setup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"Open this link to paste your token securely (expires in 5 min):\n{link}\n\n"
             "Your token never passes through Telegram — it goes directly from your browser to the bot server over HTTPS."
         )
-    else:
+    elif config.CANVAS_TOKEN:
+        # Local/self-hosted mode: use token from .env
+        await reply(update.message, context, "Verifying token from .env...")
+        try:
+            courses = await canvas.get_courses(config.CANVAS_TOKEN)
+        except Exception:
+            await reply(update.message, context, "The CANVAS_TOKEN in your .env doesn't seem to work. Please check it.")
+            return
+        await models.upsert_user(telegram_id, config.CANVAS_TOKEN, token_source="env")
+        canvas.clear_course_cache(config.CANVAS_TOKEN)
+        await reply(
+            update.message, context,
+            f"Canvas token verified and saved! Found {len(courses)} active course(s).\n\n"
+            "Try /assignments or /due to see your assignments."
+        )
+    elif config.IS_SELF_HOSTED:
         await reply(
             update.message, context,
             f"{prompt}{instructions}\n"
-            "Web-based token setup is not configured. Please contact the bot administrator."
+            "Add CANVAS_TOKEN to your .env and restart the bot, then run /setup again."
+        )
+    else:
+        await reply(
+            update.message, context,
+            "Token setup is not available. Please contact the bot administrator."
         )
 
 
