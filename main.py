@@ -69,7 +69,7 @@ async def post_shutdown(application: Application) -> None:
 async def error_handler(update: object, context) -> None:
     """Global error handler — log the error and notify the user if possible."""
     err = context.error
-    logger.error("Unhandled exception: %s: %s", type(err).__name__, err)
+    logger.error("Unhandled exception: %s", type(err).__name__)
 
     if update and hasattr(update, "effective_chat") and update.effective_chat:
         try:
