@@ -6,7 +6,7 @@ A Telegram bot that helps NUS students manage their Canvas LMS assignments, quiz
 
 Start chatting with [@nusassistant_bot](https://t.me/nusassistant_bot) on Telegram and run `/setup` to link your Canvas account.
 
-You'll need a **Canvas API token** — generate one from [Canvas](https://canvas.nus.edu.sg) > Account > Settings > New Access Token.
+You'll need a **Canvas API token** — generate one from [Canvas](https://canvas.nus.edu.sg) > Account > Settings > New Access Token. The bot will give you a secure link to paste your token — it goes directly to the server over HTTPS, never through Telegram.
 
 ### What it can do
 
@@ -69,6 +69,8 @@ Edit `.env` and fill in:
 | `ADMIN_TELEGRAM_ID` | *(Optional)* Your Telegram user ID for admin commands |
 | `ADMIN_PASSWORD` | *(Optional)* Password required for admin commands |
 | `KEYVAULT_KEK_ID` | *(Optional)* Azure Key Vault key URI for token encryption (see [Azure Key Vault](#azure-key-vault-optional)) |
+| `WEB_BASE_URL` | *(Optional)* Public URL for the web-based token setup page (e.g. `https://yourbot.example.com`). Enables secure token linking via HTTPS instead of Telegram |
+| `WEB_PORT` | *(Optional)* Port for the web server (default: `8080`). Runs behind a reverse proxy (nginx) |
 
 Generate a Fernet key:
 
@@ -102,6 +104,8 @@ The bot will initialise the SQLite database on first run and start polling for m
 │       ├── files.py         # /files, folder browsing
 │       ├── todos.py         # /todos, /add_todo
 │       └── admin.py         # /admin, /broadcast (optional)
+├── web/
+│   └── server.py            # aiohttp web server for secure token setup
 ├── canvas/
 │   └── client.py            # Async Canvas LMS API client
 ├── db/
@@ -127,6 +131,7 @@ When `KEYVAULT_KEK_ID` is set, new tokens are encrypted via Key Vault. Notes and
 
 - **Database** — SQLite with WAL mode, stored as `bot.db` by default
 - **Encryption** — Canvas API tokens are encrypted at rest using either Fernet (default) or Azure Key Vault envelope encryption (if configured). Notes and todos are always Fernet-encrypted
+- **Token setup** — Tokens are linked via a web page served over HTTPS, so they never pass through Telegram. If `WEB_BASE_URL` is set, `/setup` generates a single-use link (expires in 5 minutes) to a token submission form. Requires a reverse proxy (e.g. nginx) for TLS termination
 - **Token renewal** — If your Canvas token expires, every command will tell you to run `/setup` to add a new one. Running `/setup` again replaces only the token — all your notes, todos, and settings are kept
 - **Timezones** — All times are displayed in SGT (UTC+8)
 - **Submission status** — Assignment submission detection uses `submission.attempt` to avoid false positives from instructor-graded items with no actual student submission
