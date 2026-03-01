@@ -29,7 +29,8 @@ async def setup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if existing_token:
         prompt = (
             "You already have a Canvas account linked.\n"
-            "If your token expired, you can link a new one to update it. "
+            "You can use the link below to update your token anytime — "
+            "whether it has expired or you just want to replace it. "
             "Your notes, todos, and other data will be kept.\n\n"
         )
     else:
