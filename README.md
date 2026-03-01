@@ -22,13 +22,6 @@ You'll need a **Canvas API token** — generate one from [Canvas](https://canvas
 | `/refresh` | Force a fresh fetch of your course list from Canvas |
 | `/help` | Full command list |
 
-**Admin commands** (optional, requires `ADMIN_TELEGRAM_ID` and `ADMIN_PASSWORD` in `.env`):
-
-| Command | Description |
-|---------|-------------|
-| `/admin <password>` | View user/note/todo counts |
-| `/broadcast <password>` | Send a message to all users |
-
 ---
 
 ## Self-Hosting
@@ -73,6 +66,13 @@ Edit `.env` and fill in:
 | `CANVAS_TOKEN` | *(Self-hosted only)* Your Canvas API token — `/setup` will use this directly |
 | `WEB_BASE_URL` | *(Production only)* Public URL for the web-based token setup page (e.g. `https://yourbot.example.com`) |
 | `WEB_PORT` | *(Production only)* Port for the web server (default: `8080`). Runs behind a reverse proxy (nginx) |
+
+**Admin commands** (optional, requires `ADMIN_TELEGRAM_ID` and `ADMIN_PASSWORD` in `.env`):
+
+| Command | Description |
+|---------|-------------|
+| `/admin <password>` | View user/note/todo counts |
+| `/broadcast <password>` | Send a message to all users |
 
 Generate a Fernet key:
 
