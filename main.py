@@ -25,6 +25,8 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 # Suppress python-telegram-bot debug logging — it can log Update objects containing user messages
 logging.getLogger("telegram").setLevel(logging.WARNING)
+# Suppress aiohttp access logs — they log full URLs which contain OTP tokens
+logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
