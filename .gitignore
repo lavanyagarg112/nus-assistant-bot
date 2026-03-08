@@ -22,3 +22,4 @@ next_todos.md
 .claudeignore
 instruction.sh
 .claude/worktrees/
+.claude/
