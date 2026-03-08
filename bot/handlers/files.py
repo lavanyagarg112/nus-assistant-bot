@@ -183,9 +183,16 @@ async def _show_folder(query, token: str, folder_id: int, course_id: int, path: 
             size = f.get("size", 0)
             size_str = _format_size(size)
             file_id = f.get("id", "")
-            url = f"{config.CANVAS_BASE_URL}/courses/{course_id}/files/{file_id}" if file_id else ""
-            if url:
-                lines.append(f"[{_escape_md(name)}]({_escape_url(url)}) \\({_escape_md(size_str)}\\)")
+            page_url = f"{config.CANVAS_BASE_URL}/courses/{course_id}/files/{file_id}" if file_id else ""
+            download_url = f.get("url", "")
+            if page_url and download_url:
+                lines.append(
+                    f"[{_escape_md(name)}]({_escape_url(page_url)}) "
+                    f"\\| [Download]({_escape_url(download_url)}) "
+                    f"\\({_escape_md(size_str)}\\)"
+                )
+            elif page_url:
+                lines.append(f"[{_escape_md(name)}]({_escape_url(page_url)}) \\({_escape_md(size_str)}\\)")
             else:
                 lines.append(f"{_escape_md(name)} \\({_escape_md(size_str)}\\)")
 

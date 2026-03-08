@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "deny": [
+      "Read .env",
+      "Read .env.*",
+      "Read github_token.txt",
+      "Read *.pem",
+      "Read next_todos.md"
+    ]
+  }
+}

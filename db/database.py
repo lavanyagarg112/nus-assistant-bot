@@ -69,6 +69,18 @@ async def init_db() -> None:
             FOREIGN KEY (telegram_id) REFERENCES users(telegram_id) ON DELETE CASCADE
         )""",
         "CREATE INDEX IF NOT EXISTS idx_todos_user ON todos(telegram_id)",
+        """CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id INTEGER NOT NULL,
+            type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            due_at TEXT NOT NULL,
+            venue TEXT,
+            notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (telegram_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_events_user ON events(telegram_id)",
     ]
     for stmt in statements:
         await db.execute(stmt)

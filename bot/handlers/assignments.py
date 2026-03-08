@@ -318,7 +318,7 @@ async def quiz_detail_callback(
 
 
 async def _fetch_and_format_due(
-    token: str, days: int, show_submitted: bool = False
+    token: str, days: int, show_submitted: bool = False, telegram_id: int | None = None
 ) -> tuple[str | None, InlineKeyboardMarkup]:
     """Fetch upcoming assignments and return (MarkdownV2 text, keyboard).
 
@@ -327,7 +327,18 @@ async def _fetch_and_format_due(
     upcoming = await canvas.get_upcoming_assignments(token, days=days)
     markup = keyboards.due_list(show_submitted, days)
 
-    if not upcoming:
+    # Fetch custom events and merge
+    custom_events = []
+    if telegram_id:
+        all_events = await models.get_events(telegram_id)
+        now = datetime.now(timezone.utc)
+        cutoff = now + timedelta(days=days)
+        for e in all_events:
+            dt = datetime.fromisoformat(e["due_at"])
+            if dt <= cutoff:
+                custom_events.append(e)
+
+    if not upcoming and not custom_events:
         return None, markup
 
     pending = [a for a in upcoming if not canvas.is_submitted(a)]
@@ -348,8 +359,20 @@ async def _fetch_and_format_due(
                 link = canvas.assignment_url(course_id, a["id"])
             lines.append(f"\\- {type_tag} [{_escape_md(a['name'])}]({_escape_url(link)})")
             lines.append(f"  {_escape_md(course)} \\| {_escape_md(due)}\n")
-    else:
+    elif not custom_events:
         lines.append("_All items have been submitted\\!_\n")
+
+    # Custom events
+    if custom_events:
+        lines.append("*Custom Events*\n")
+        for e in custom_events:
+            tag = "Exam" if e["type"] == "exam" else "Asgn"
+            due = _format_due(e["due_at"])
+            lines.append(f"\\- \\[Custom\\] \\[{_escape_md(tag)}\\] {_escape_md(e['title'])}")
+            extra = _escape_md(due)
+            if e.get("venue"):
+                extra += f" \\| {_escape_md(e['venue'])}"
+            lines.append(f"  {extra}\n")
 
     if show_submitted and submitted:
         lines.append(f"\n*Submitted*\n")
@@ -391,7 +414,7 @@ async def due_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.message
     loading = await reply(msg, context, "Loading upcoming deadlines...")
     try:
-        text, markup = await _fetch_and_format_due(token, days)
+        text, markup = await _fetch_and_format_due(token, days, telegram_id=update.effective_user.id)
     except CanvasTokenError:
         await loading.edit_text(TOKEN_EXPIRED_MSG)
         return
@@ -424,7 +447,7 @@ async def due_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     days = 7
     loading = await reply_or_edit(query, context, "Loading upcoming deadlines...")
     try:
-        text, markup = await _fetch_and_format_due(token, days)
+        text, markup = await _fetch_and_format_due(token, days, telegram_id=update.effective_user.id)
     except CanvasTokenError:
         await loading.edit_text(TOKEN_EXPIRED_MSG)
         return
@@ -460,7 +483,7 @@ async def due_toggle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     days = int(parts[3]) if len(parts) > 3 else 7
 
     try:
-        text, markup = await _fetch_and_format_due(token, days, show_submitted=show_submitted)
+        text, markup = await _fetch_and_format_due(token, days, show_submitted=show_submitted, telegram_id=update.effective_user.id)
     except CanvasTokenError:
         await query.edit_message_text(TOKEN_EXPIRED_MSG)
         return

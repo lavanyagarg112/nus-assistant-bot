@@ -20,6 +20,10 @@ from db import models
 logger = logging.getLogger(__name__)
 
 WAITING_TODO_TEXT = 0
+WAITING_TODO_DELETE_NUM = 1
+WAITING_TODO_TOGGLE_NUM = 2
+
+ITEMS_PER_PAGE = 10
 
 
 # ── /todos — list all active todos ──
@@ -45,7 +49,10 @@ async def todos_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update.message, context, msg, reply_markup=keyboards.back_to_menu())
         return
 
-    text, markup = await _format_todos(telegram_id, todos, show_done)
+    context.user_data["todos_show_done"] = show_done
+    context.user_data["todos_list"] = todos
+    page = 0
+    text, markup = await _format_todos(telegram_id, todos, show_done, page)
     await reply(update.message, context, text, parse_mode="MarkdownV2", reply_markup=markup)
 
 
@@ -63,14 +70,17 @@ async def todos_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return
 
-    text, markup = await _format_todos(telegram_id, todos, False)
+    context.user_data["todos_show_done"] = False
+    context.user_data["todos_list"] = todos
+    page = 0
+    text, markup = await _format_todos(telegram_id, todos, False, page)
     await reply_or_edit(query, context, text, parse_mode="MarkdownV2", reply_markup=markup)
 
 
 async def _format_todos(
-    telegram_id: int, todos: list[dict], show_done: bool
+    telegram_id: int, todos: list[dict], show_done: bool, page: int = 0
 ) -> tuple[str, InlineKeyboardMarkup]:
-    """Format todos as MarkdownV2 text and build inline keyboard."""
+    """Format todos as a numbered MarkdownV2 list with pagination keyboard."""
     # Build course name lookup
     course_names: dict[int, str] = {}
     course_ids = {t["canvas_course_id"] for t in todos if t["canvas_course_id"]}
@@ -83,40 +93,28 @@ async def _format_todos(
         except Exception:
             pass
 
-    # Group by course
-    grouped: dict[int | None, list[dict]] = {}
-    for t in todos:
-        grouped.setdefault(t["canvas_course_id"], []).append(t)
+    total = len(todos)
+    total_pages = max(1, (total + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
+    start = page * ITEMS_PER_PAGE
+    end = min(start + ITEMS_PER_PAGE, total)
+    page_todos = todos[start:end]
 
     lines = ["*Your TODOs*\n"]
-    buttons = []
 
-    for course_id, items in grouped.items():
+    for i, t in enumerate(page_todos, start=start + 1):
+        check = "✅" if t["done"] else "⬜"
+        strike = f"~{_escape_md(t['text'])}~" if t["done"] else _escape_md(t["text"])
+        course_id = t["canvas_course_id"]
         if course_id:
             course_name = course_names.get(course_id, f"Course #{course_id}")
-            lines.append(f"*{_escape_md(course_name)}*")
+            lines.append(f"*{i}\\.* {check} {strike}")
+            lines.append(f"    _{_escape_md(course_name)}_")
         else:
-            lines.append("*General*")
-
-        for t in items:
-            check = "✅" if t["done"] else "⬜"
-            strike = f"~{_escape_md(t['text'])}~" if t["done"] else _escape_md(t["text"])
-            lines.append(f"  {check} {strike}")
-
-            # Add toggle and delete buttons for each todo
-            toggle_label = "Undo" if t["done"] else "✓ Done"
-            buttons.append([
-                InlineKeyboardButton(f"{toggle_label}: {t['text'][:20]}", callback_data=f"todotoggle_{t['id']}"),
-                InlineKeyboardButton("🗑", callback_data=f"tododel_{t['id']}"),
-            ])
+            lines.append(f"*{i}\\.* {check} {strike}")
         lines.append("")
 
-    if show_done:
-        buttons.append([InlineKeyboardButton("Hide Completed", callback_data="todos_active")])
-    else:
-        buttons.append([InlineKeyboardButton("Show Completed", callback_data="todos_all")])
-    buttons.append([InlineKeyboardButton("<< Back to Menu", callback_data="cmd_menu")])
-    return _truncate_message("\n".join(lines)), InlineKeyboardMarkup(buttons)
+    markup = keyboards.todos_list_keyboard(show_done, page, total_pages)
+    return _truncate_message("\n".join(lines)), markup
 
 
 # ── Show all / active todos toggle ──
@@ -134,65 +132,120 @@ async def todos_show_all_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text(msg, reply_markup=keyboards.back_to_menu())
         return
 
-    text, markup = await _format_todos(telegram_id, todos, show_done)
+    context.user_data["todos_show_done"] = show_done
+    context.user_data["todos_list"] = todos
+    text, markup = await _format_todos(telegram_id, todos, show_done, 0)
     await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=markup)
 
 
-# ── Toggle todo done/undone ──
-
-
-def _is_showing_done(query) -> bool:
-    """Check if the current view is showing completed todos by inspecting the keyboard."""
-    if query.message and query.message.reply_markup:
-        for row in query.message.reply_markup.inline_keyboard:
-            for btn in row:
-                if btn.callback_data == "todos_active":
-                    return True  # "Hide Completed" button present → showing done
-    return False
-
-
-async def todo_toggle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def todos_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
     telegram_id = update.effective_user.id
-    todo_id = int(query.data.split("_")[1])
 
-    toggled = await models.toggle_todo(todo_id, telegram_id)
-    if not toggled:
-        await query.edit_message_text("Todo not found.", reply_markup=keyboards.back_to_menu())
-        return
-
-    # Re-render the list preserving the current view mode
-    show_done = _is_showing_done(query)
+    page = int(query.data.split("_")[2])
+    show_done = context.user_data.get("todos_show_done", False)
     todos = await models.get_todos(telegram_id, include_done=show_done)
     if not todos:
-        await query.edit_message_text("All done! No todos left.", reply_markup=keyboards.back_to_menu())
+        await query.edit_message_text("No todos.", reply_markup=keyboards.back_to_menu())
         return
 
-    text, markup = await _format_todos(telegram_id, todos, show_done)
+    context.user_data["todos_list"] = todos
+    text, markup = await _format_todos(telegram_id, todos, show_done, page)
     await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=markup)
 
 
-# ── Delete todo ──
+# ── Toggle todo (numbered conversation) ──
 
 
-async def todo_delete_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def todos_toggle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    telegram_id = update.effective_user.id
-    todo_id = int(query.data.split("_")[1])
 
-    await models.delete_todo(todo_id, telegram_id)
-
-    # Re-render the list preserving the current view mode
-    show_done = _is_showing_done(query)
-    todos = await models.get_todos(telegram_id, include_done=show_done)
+    todos = context.user_data.get("todos_list", [])
     if not todos:
-        await query.edit_message_text("No todos left! Use /add_todo to create one.", reply_markup=keyboards.back_to_menu())
-        return
+        await reply_or_edit(query, context, "No todos to toggle.", reply_markup=keyboards.back_to_menu())
+        return ConversationHandler.END
 
-    text, markup = await _format_todos(telegram_id, todos, show_done)
-    await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=markup)
+    context.user_data["toggle_todo_ids"] = [t["id"] for t in todos]
+    await reply_or_edit(query, context, "Send the number of the todo to toggle done/undone (or /cancel):")
+    return WAITING_TODO_TOGGLE_NUM
+
+
+async def todos_toggle_receive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    text = update.message.text.strip()
+    ids = context.user_data.get("toggle_todo_ids", [])
+
+    try:
+        num = int(text)
+    except ValueError:
+        await reply(update.message, context, "Please send a valid number (or /cancel).")
+        return WAITING_TODO_TOGGLE_NUM
+
+    if num < 1 or num > len(ids):
+        await reply(update.message, context, f"Please send a number between 1 and {len(ids)} (or /cancel).")
+        return WAITING_TODO_TOGGLE_NUM
+
+    todo_id = ids[num - 1]
+    toggled = await models.toggle_todo(todo_id, update.effective_user.id)
+    context.user_data.pop("toggle_todo_ids", None)
+
+    if toggled:
+        await reply(update.message, context, "Todo updated!", reply_markup=keyboards.back_to_menu())
+    else:
+        await reply(update.message, context, "Todo not found.", reply_markup=keyboards.back_to_menu())
+    return ConversationHandler.END
+
+
+async def todos_toggle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data.pop("toggle_todo_ids", None)
+    await reply(update.message, context, "Cancelled.", reply_markup=keyboards.back_to_menu())
+    return ConversationHandler.END
+
+
+# ── Delete todo (numbered conversation) ──
+
+
+async def todos_delete_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+
+    todos = context.user_data.get("todos_list", [])
+    if not todos:
+        await reply_or_edit(query, context, "No todos to delete.", reply_markup=keyboards.back_to_menu())
+        return ConversationHandler.END
+
+    context.user_data["delete_todo_ids"] = [t["id"] for t in todos]
+    await reply_or_edit(query, context, "Send the number of the todo to delete (or /cancel):")
+    return WAITING_TODO_DELETE_NUM
+
+
+async def todos_delete_receive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    text = update.message.text.strip()
+    ids = context.user_data.get("delete_todo_ids", [])
+
+    try:
+        num = int(text)
+    except ValueError:
+        await reply(update.message, context, "Please send a valid number (or /cancel).")
+        return WAITING_TODO_DELETE_NUM
+
+    if num < 1 or num > len(ids):
+        await reply(update.message, context, f"Please send a number between 1 and {len(ids)} (or /cancel).")
+        return WAITING_TODO_DELETE_NUM
+
+    todo_id = ids[num - 1]
+    await models.delete_todo(todo_id, update.effective_user.id)
+    context.user_data.pop("delete_todo_ids", None)
+
+    await reply(update.message, context, "Todo deleted.", reply_markup=keyboards.back_to_menu())
+    return ConversationHandler.END
+
+
+async def todos_delete_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data.pop("delete_todo_ids", None)
+    await reply(update.message, context, "Cancelled.", reply_markup=keyboards.back_to_menu())
+    return ConversationHandler.END
 
 
 # ── /add_todo — pick course then type text ──
@@ -294,6 +347,42 @@ def get_add_todo_handler() -> ConversationHandler:
         fallbacks=[
             CommandHandler("cancel", add_todo_cancel),
             MessageHandler(filters.COMMAND, make_fallback_command("add_todo")),
+        ],
+        per_message=False,
+    )
+
+
+def get_todo_toggle_handler() -> ConversationHandler:
+    return ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(todos_toggle_start, pattern=r"^todos_toggle_start$"),
+        ],
+        states={
+            WAITING_TODO_TOGGLE_NUM: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, todos_toggle_receive),
+            ],
+        },
+        fallbacks=[
+            CommandHandler("cancel", todos_toggle_cancel),
+            MessageHandler(filters.COMMAND, make_fallback_command("todos")),
+        ],
+        per_message=False,
+    )
+
+
+def get_todo_delete_handler() -> ConversationHandler:
+    return ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(todos_delete_start, pattern=r"^todos_delete_start$"),
+        ],
+        states={
+            WAITING_TODO_DELETE_NUM: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, todos_delete_receive),
+            ],
+        },
+        fallbacks=[
+            CommandHandler("cancel", todos_delete_cancel),
+            MessageHandler(filters.COMMAND, make_fallback_command("todos")),
         ],
         per_message=False,
     )

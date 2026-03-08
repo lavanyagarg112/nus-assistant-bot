@@ -2,7 +2,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from telegram import Update
+from telegram import InlineKeyboardMarkup, Update
 from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
@@ -25,6 +25,9 @@ SGT = timezone(timedelta(hours=8))
 WAITING_NOTE = 0
 CAPTURING_QUICKNOTE = 1
 WAITING_SEARCH_QUERY = 2
+WAITING_GNOTE_DELETE_NUM = 3
+
+ITEMS_PER_PAGE = 10
 
 
 # ── /notes command: list all notes ──
@@ -244,22 +247,128 @@ async def notes_filter_callback(update: Update, context: ContextTypes.DEFAULT_TY
             )
             return
         lines = await _format_notes(token, assignment_notes, [])
+        await reply_or_edit(
+            query, context,
+            "\n".join(lines),
+            parse_mode="MarkdownV2",
+            reply_markup=keyboards.back_to_notes(),
+        )
     else:
         general_notes = await models.get_all_general_notes(user_id)
         if not general_notes:
             await reply_or_edit(
                 query, context,
-                "No general notes yet.\nUse /start_notes for freeform capture.",
+                "No general notes yet.\nUse /start_notes or /sn for freeform capture.",
                 reply_markup=keyboards.back_to_notes(),
             )
             return
-        lines = await _format_notes(token, [], general_notes)
+        context.user_data["gnotes_list"] = general_notes
+        page = 0
+        text, markup = _format_general_notes_page(general_notes, page)
+        await reply_or_edit(query, context, text, parse_mode="MarkdownV2", reply_markup=markup)
 
-    await reply_or_edit(
-        query, context,
-        "\n".join(lines),
-        parse_mode="MarkdownV2",
-        reply_markup=keyboards.back_to_notes(),
+
+def _format_general_notes_page(
+    general_notes: list[dict], page: int
+) -> tuple[str, InlineKeyboardMarkup]:
+    """Format general notes as a numbered list with pagination."""
+    total = len(general_notes)
+    total_pages = max(1, (total + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
+    start = page * ITEMS_PER_PAGE
+    end = min(start + ITEMS_PER_PAGE, total)
+    page_notes = general_notes[start:end]
+
+    lines = ["*General Notes*\n"]
+    for i, n in enumerate(page_notes, start=start + 1):
+        created_utc = datetime.fromisoformat(n["created_at"]).replace(tzinfo=timezone.utc)
+        created_sgt = created_utc.astimezone(SGT).strftime("%d %b %Y %H:%M") + " SGT"
+        lines.append(f"*{i}\\.* {_escape_md(n['content'][:100])}")
+        lines.append(f"    _{_escape_md(created_sgt)}_\n")
+
+    text = _truncate_message("\n".join(lines))
+    markup = keyboards.general_notes_with_delete(page, total_pages)
+    return text, markup
+
+
+async def gnotes_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+
+    page = int(query.data.split("_")[2])
+    general_notes = await models.get_all_general_notes(user_id)
+    if not general_notes:
+        await query.edit_message_text("No general notes.", reply_markup=keyboards.back_to_notes())
+        return
+
+    context.user_data["gnotes_list"] = general_notes
+    text, markup = _format_general_notes_page(general_notes, page)
+    await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=markup)
+
+
+# ── Delete general note (numbered) ──
+
+
+async def gnotes_delete_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+
+    gnotes = context.user_data.get("gnotes_list", [])
+    if not gnotes:
+        await reply_or_edit(query, context, "No notes to delete.", reply_markup=keyboards.back_to_notes())
+        return ConversationHandler.END
+
+    context.user_data["delete_gnote_ids"] = [n["id"] for n in gnotes]
+    await reply_or_edit(query, context, "Send the number of the note to delete (or /cancel):")
+    return WAITING_GNOTE_DELETE_NUM
+
+
+async def gnotes_delete_receive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    text = update.message.text.strip()
+    ids = context.user_data.get("delete_gnote_ids", [])
+
+    try:
+        num = int(text)
+    except ValueError:
+        await reply(update.message, context, "Please send a valid number (or /cancel).")
+        return WAITING_GNOTE_DELETE_NUM
+
+    if num < 1 or num > len(ids):
+        await reply(update.message, context, f"Please send a number between 1 and {len(ids)} (or /cancel).")
+        return WAITING_GNOTE_DELETE_NUM
+
+    note_id = ids[num - 1]
+    deleted = await models.delete_general_note(note_id, update.effective_user.id)
+    context.user_data.pop("delete_gnote_ids", None)
+
+    if deleted:
+        await reply(update.message, context, "Note deleted.", reply_markup=keyboards.back_to_notes())
+    else:
+        await reply(update.message, context, "Note not found.", reply_markup=keyboards.back_to_notes())
+    return ConversationHandler.END
+
+
+async def gnotes_delete_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data.pop("delete_gnote_ids", None)
+    await reply(update.message, context, "Cancelled.", reply_markup=keyboards.back_to_notes())
+    return ConversationHandler.END
+
+
+def get_gnote_delete_handler() -> ConversationHandler:
+    return ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(gnotes_delete_start, pattern=r"^gnotes_delete$"),
+        ],
+        states={
+            WAITING_GNOTE_DELETE_NUM: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, gnotes_delete_receive),
+            ],
+        },
+        fallbacks=[
+            CommandHandler("cancel", gnotes_delete_cancel),
+            MessageHandler(filters.COMMAND, make_fallback_command("notes")),
+        ],
+        per_message=False,
     )
 
 
@@ -386,7 +495,10 @@ async def quicknote_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 def get_quicknote_handler() -> ConversationHandler:
     return ConversationHandler(
-        entry_points=[CommandHandler("start_notes", start_notes_cmd)],
+        entry_points=[
+            CommandHandler("start_notes", start_notes_cmd),
+            CommandHandler("sn", start_notes_cmd),
+        ],
         states={
             CAPTURING_QUICKNOTE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, quicknote_capture),

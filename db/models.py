@@ -144,8 +144,9 @@ async def get_canvas_token(telegram_id: int) -> str | None:
 
 
 async def delete_user(telegram_id: int) -> None:
-    """Delete user and all their data (token, notes, general notes, todos)."""
+    """Delete user and all their data (token, notes, general notes, todos, events)."""
     db = await get_db()
+    await db.execute("DELETE FROM events WHERE telegram_id = ?", (telegram_id,))
     await db.execute("DELETE FROM todos WHERE telegram_id = ?", (telegram_id,))
     await db.execute("DELETE FROM general_notes WHERE telegram_id = ?", (telegram_id,))
     await db.execute("DELETE FROM notes WHERE telegram_id = ?", (telegram_id,))
@@ -325,6 +326,72 @@ async def delete_todo(todo_id: int, telegram_id: int) -> bool:
     return cursor.rowcount > 0
 
 
+# ── Events CRUD ──
+
+
+async def add_event(
+    telegram_id: int,
+    event_type: str,
+    title: str,
+    due_at: str,
+    venue: str | None = None,
+    notes: str | None = None,
+) -> int:
+    db = await get_db()
+    cursor = await db.execute(
+        "INSERT INTO events (telegram_id, type, title, due_at, venue, notes) VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            telegram_id,
+            event_type,
+            _encrypt(title),
+            due_at,
+            _encrypt(venue) if venue else None,
+            _encrypt(notes) if notes else None,
+        ),
+    )
+    await db.commit()
+    return cursor.lastrowid
+
+
+async def get_events(telegram_id: int, include_past: bool = False) -> list[dict]:
+    db = await get_db()
+    if include_past:
+        rows = await db.execute_fetchall(
+            "SELECT id, type, title, due_at, venue, notes, created_at FROM events WHERE telegram_id = ? ORDER BY due_at ASC",
+            (telegram_id,),
+        )
+    else:
+        from datetime import datetime, timezone
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        rows = await db.execute_fetchall(
+            "SELECT id, type, title, due_at, venue, notes, created_at FROM events WHERE telegram_id = ? AND due_at >= ? ORDER BY due_at ASC",
+            (telegram_id, now_iso),
+        )
+    return [
+        {
+            "id": r[0],
+            "type": r[1],
+            "title": _decrypt(r[2]),
+            "due_at": r[3],
+            "venue": _decrypt(r[4]) if r[4] else None,
+            "notes": _decrypt(r[5]) if r[5] else None,
+            "created_at": r[6],
+        }
+        for r in rows
+    ]
+
+
+async def delete_event(event_id: int, telegram_id: int) -> bool:
+    db = await get_db()
+    cursor = await db.execute(
+        "DELETE FROM events WHERE id = ? AND telegram_id = ?",
+        (event_id, telegram_id),
+    )
+    await db.commit()
+    return cursor.rowcount > 0
+
+
 async def get_stats() -> dict:
     """Return aggregate stats for admin dashboard."""
     db = await get_db()
@@ -340,12 +407,15 @@ async def get_stats() -> dict:
     todo_done_count = rows[0][0]
     rows = await db.execute_fetchall("SELECT COUNT(*) FROM users WHERE reminder_hour IS NOT NULL")
     reminder_count = rows[0][0]
+    rows = await db.execute_fetchall("SELECT COUNT(*) FROM events")
+    event_count = rows[0][0]
     return {
         "users": user_count,
         "notes": note_count,
         "general_notes": general_note_count,
         "todos": todo_count,
         "todos_done": todo_done_count,
+        "events": event_count,
         "reminders_enabled": reminder_count,
     }
 
@@ -375,6 +445,16 @@ async def search_notes(telegram_id: int, query: str) -> tuple[list[dict], list[d
     ]
 
     return matching_assignment, matching_general
+
+
+async def delete_general_note(note_id: int, telegram_id: int) -> bool:
+    db = await get_db()
+    cursor = await db.execute(
+        "DELETE FROM general_notes WHERE id = ? AND telegram_id = ?",
+        (note_id, telegram_id),
+    )
+    await db.commit()
+    return cursor.rowcount > 0
 
 
 async def delete_note(telegram_id: int, canvas_assignment_id: int) -> bool:

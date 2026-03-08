@@ -11,7 +11,7 @@ from telegram.ext import (
 )
 
 import config
-from bot.handlers import admin, assignments, files, notes, settings, start, todos
+from bot.handlers import admin, assignments, events, files, notes, settings, start, todos
 from canvas import client as canvas
 from canvas.client import CanvasTokenError
 from db import models
@@ -157,7 +157,12 @@ def main() -> None:
     app.add_handler(notes.get_quicknote_handler())
     app.add_handler(notes.get_search_handler())
     app.add_handler(notes.get_note_handler())
+    app.add_handler(notes.get_gnote_delete_handler())
     app.add_handler(todos.get_add_todo_handler())
+    app.add_handler(todos.get_todo_toggle_handler())
+    app.add_handler(todos.get_todo_delete_handler())
+    app.add_handler(events.get_add_event_handler())
+    app.add_handler(events.get_event_delete_handler())
     app.add_handler(admin.get_broadcast_handler())
 
     # Command handlers
@@ -174,6 +179,8 @@ def main() -> None:
     app.add_handler(CommandHandler("reminder", settings.reminder_cmd))
     app.add_handler(CommandHandler("todos", todos.todos_cmd))
     app.add_handler(CommandHandler("add_todo", todos.add_todo_cmd))
+    app.add_handler(CommandHandler("events", events.events_cmd))
+    app.add_handler(CommandHandler("add_event", events.add_event_cmd))
     app.add_handler(CommandHandler("refresh", settings.refresh_cmd))
     app.add_handler(CommandHandler("admin", admin.admin_cmd))
 
@@ -190,14 +197,16 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(settings.unlink_confirm_callback, pattern="^unlink_confirm$"))
     app.add_handler(CallbackQueryHandler(todos.todos_callback, pattern="^cmd_todos$"))
     app.add_handler(CallbackQueryHandler(todos.todos_show_all_callback, pattern=r"^todos_(all|active)$"))
-    app.add_handler(CallbackQueryHandler(todos.todo_toggle_callback, pattern=r"^todotoggle_\d+$"))
-    app.add_handler(CallbackQueryHandler(todos.todo_delete_callback, pattern=r"^tododel_\d+$"))
+    app.add_handler(CallbackQueryHandler(todos.todos_page_callback, pattern=r"^todos_page_\d+$"))
     app.add_handler(CallbackQueryHandler(assignments.due_toggle_callback, pattern=r"^due_(show|hide)_submitted(_\d+)?$"))
     app.add_handler(CallbackQueryHandler(assignments.course_callback, pattern=r"^course_\d+$"))
     app.add_handler(CallbackQueryHandler(assignments.assignment_detail_callback, pattern=r"^asgn_\d+_\d+$"))
     app.add_handler(CallbackQueryHandler(assignments.quiz_detail_callback, pattern=r"^quiz_\d+_\d+$"))
     app.add_handler(CallbackQueryHandler(notes.notes_filter_callback, pattern=r"^notes_filter_(assignment|general)$"))
     app.add_handler(CallbackQueryHandler(notes.note_delete, pattern=r"^note_del_\d+_\d+$"))
+    app.add_handler(CallbackQueryHandler(notes.gnotes_page_callback, pattern=r"^gnotes_page_\d+$"))
+    app.add_handler(CallbackQueryHandler(events.events_callback, pattern="^cmd_events$"))
+    app.add_handler(CallbackQueryHandler(events.events_page_callback, pattern=r"^events_page_\d+$"))
 
     # Fallback: unknown messages
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, notes.unknown_message))

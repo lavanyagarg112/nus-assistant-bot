@@ -16,6 +16,7 @@ def main_menu() -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton("Files", callback_data="cmd_files"),
+                InlineKeyboardButton("Events", callback_data="cmd_events"),
             ],
             [
                 InlineKeyboardButton("Settings", callback_data="cmd_settings"),
@@ -156,3 +157,49 @@ def back_to_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton("<< Back to Menu", callback_data="cmd_menu")]]
     )
+
+
+def event_type_picker() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Exam", callback_data="eventtype_exam"),
+            InlineKeyboardButton("Assignment", callback_data="eventtype_assignment"),
+        ],
+        [InlineKeyboardButton("<< Cancel", callback_data="cmd_menu")],
+    ])
+
+
+def general_notes_with_delete(page: int, total_pages: int) -> InlineKeyboardMarkup:
+    buttons = []
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton("< Prev", callback_data=f"gnotes_page_{page - 1}"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton("Next >", callback_data=f"gnotes_page_{page + 1}"))
+    if nav_row:
+        buttons.append(nav_row)
+    buttons.append([InlineKeyboardButton("Delete Note", callback_data="gnotes_delete")])
+    buttons.append([InlineKeyboardButton("<< Back to Notes", callback_data="cmd_notes")])
+    buttons.append([InlineKeyboardButton("<< Back to Menu", callback_data="cmd_menu")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def todos_list_keyboard(show_done: bool, page: int, total_pages: int) -> InlineKeyboardMarkup:
+    buttons = []
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton("< Prev", callback_data=f"todos_page_{page - 1}"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton("Next >", callback_data=f"todos_page_{page + 1}"))
+    if nav_row:
+        buttons.append(nav_row)
+    buttons.append([
+        InlineKeyboardButton("Toggle Done", callback_data="todos_toggle_start"),
+        InlineKeyboardButton("Delete", callback_data="todos_delete_start"),
+    ])
+    if show_done:
+        buttons.append([InlineKeyboardButton("Hide Completed", callback_data="todos_active")])
+    else:
+        buttons.append([InlineKeyboardButton("Show Completed", callback_data="todos_all")])
+    buttons.append([InlineKeyboardButton("<< Back to Menu", callback_data="cmd_menu")])
+    return InlineKeyboardMarkup(buttons)
