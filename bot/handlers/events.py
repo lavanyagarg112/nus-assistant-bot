@@ -12,7 +12,7 @@ from telegram.ext import (
 )
 
 from bot import keyboards
-from bot.handlers.assignments import _escape_md, _truncate_message
+from bot.handlers.assignments import _escape_md, _split_message
 from bot.utils import make_fallback_command, reply, reply_or_edit
 from db import models
 
@@ -50,9 +50,11 @@ async def events_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
 
     page = 0
-    text, markup = _format_events(events, page)
+    chunks, markup = _format_events(events, page)
     context.user_data["events_list"] = events
-    await reply(update.message, context, text, parse_mode="MarkdownV2", reply_markup=markup)
+    for extra in chunks[:-1]:
+        await reply(update.message, context, extra, parse_mode="MarkdownV2")
+    await reply(update.message, context, chunks[-1], parse_mode="MarkdownV2", reply_markup=markup)
 
 
 async def events_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -69,9 +71,11 @@ async def events_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     page = 0
-    text, markup = _format_events(events, page)
+    chunks, markup = _format_events(events, page)
     context.user_data["events_list"] = events
-    await reply_or_edit(query, context, text, parse_mode="MarkdownV2", reply_markup=markup)
+    for extra in chunks[:-1]:
+        await query.message.reply_text(extra, parse_mode="MarkdownV2")
+    await reply_or_edit(query, context, chunks[-1], parse_mode="MarkdownV2", reply_markup=markup)
 
 
 def _format_events(events: list[dict], page: int) -> tuple[str, InlineKeyboardMarkup]:
@@ -107,7 +111,7 @@ def _format_events(events: list[dict], page: int) -> tuple[str, InlineKeyboardMa
     buttons.append([InlineKeyboardButton("Delete Event", callback_data="events_delete")])
     buttons.append([InlineKeyboardButton("<< Back to Menu", callback_data="cmd_menu")])
 
-    return _truncate_message("\n".join(lines)), InlineKeyboardMarkup(buttons)
+    return _split_message("\n".join(lines)), InlineKeyboardMarkup(buttons)
 
 
 async def events_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -121,8 +125,10 @@ async def events_page_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     context.user_data["events_list"] = events
-    text, markup = _format_events(events, page)
-    await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=markup)
+    chunks, markup = _format_events(events, page)
+    for extra in chunks[:-1]:
+        await query.message.reply_text(extra, parse_mode="MarkdownV2")
+    await query.edit_message_text(chunks[-1], parse_mode="MarkdownV2", reply_markup=markup)
 
 
 # ── Delete event (numbered) ──

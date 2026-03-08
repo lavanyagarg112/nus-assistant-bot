@@ -13,7 +13,7 @@ from telegram.ext import (
 )
 
 from bot import keyboards
-from bot.handlers.assignments import _escape_md, _require_token, _truncate_message
+from bot.handlers.assignments import _escape_md, _require_token, _split_message
 from bot.utils import check_migration_reminder, make_fallback_command, reply, reply_or_edit
 from canvas import client as canvas
 from db import models
@@ -70,7 +70,7 @@ async def _build_combined_notes(token: str, user_id: int, context: ContextTypes.
             course_name = course_names.get(n["canvas_course_id"], "Unknown Course")
             flat.append({
                 "type": "assignment",
-                "summary": f"\\[A\\] *{_escape_md(name)}*\n    _{_escape_md(course_name)}_\n    {_escape_md(n['note_text'][:100])}",
+                "summary": f"\\[A\\] *{_escape_md(name)}*\n    _{_escape_md(course_name)}_\n    {_escape_md(n['note_text'])}",
             })
 
     for n in general_notes:
@@ -78,15 +78,15 @@ async def _build_combined_notes(token: str, user_id: int, context: ContextTypes.
         created_sgt = created_utc.astimezone(SGT).strftime("%d %b %Y %H:%M") + " SGT"
         flat.append({
             "type": "general",
-            "summary": f"\\[G\\] {_escape_md(n['content'][:100])}\n    _{_escape_md(created_sgt)}_",
+            "summary": f"\\[G\\] {_escape_md(n['content'])}\n    _{_escape_md(created_sgt)}_",
         })
 
     context.user_data["all_notes_flat"] = flat
     return flat
 
 
-def _format_notes_page(flat: list[dict], page: int) -> tuple[str, int]:
-    """Format a page of the combined notes list. Returns (text, total_pages)."""
+def _format_notes_page(flat: list[dict], page: int) -> tuple[list[str], int]:
+    """Format a page of the combined notes list. Returns (text_chunks, total_pages)."""
     total = len(flat)
     total_pages = max(1, (total + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
     start = page * ITEMS_PER_PAGE
@@ -97,7 +97,7 @@ def _format_notes_page(flat: list[dict], page: int) -> tuple[str, int]:
     for i, item in enumerate(page_items, start=start + 1):
         lines.append(f"*{i}\\.* {item['summary']}\n")
 
-    return _truncate_message("\n".join(lines)), total_pages
+    return _split_message("\n".join(lines)), total_pages
 
 
 async def notes_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -116,10 +116,13 @@ async def notes_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         return
 
-    text, total_pages = _format_notes_page(flat, 0)
+    chunks, total_pages = _format_notes_page(flat, 0)
+    # Send overflow chunks first (no keyboard), then main chunk with keyboard last
+    for extra in chunks[:-1]:
+        await reply(update.message, context, extra, parse_mode="MarkdownV2")
     await reply(
         update.message, context,
-        text,
+        chunks[-1],
         parse_mode="MarkdownV2",
         reply_markup=keyboards.notes_menu(0, total_pages),
     )
@@ -143,10 +146,12 @@ async def notes_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return
 
-    text, total_pages = _format_notes_page(flat, 0)
+    chunks, total_pages = _format_notes_page(flat, 0)
+    for extra in chunks[:-1]:
+        await query.message.reply_text(extra, parse_mode="MarkdownV2")
     await reply_or_edit(
         query, context,
-        text,
+        chunks[-1],
         parse_mode="MarkdownV2",
         reply_markup=keyboards.notes_menu(0, total_pages),
     )
@@ -169,9 +174,11 @@ async def notes_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text("No notes found.", reply_markup=keyboards.notes_menu())
         return
 
-    text, total_pages = _format_notes_page(flat, page)
+    chunks, total_pages = _format_notes_page(flat, page)
+    for extra in chunks[:-1]:
+        await query.message.reply_text(extra, parse_mode="MarkdownV2")
     await query.edit_message_text(
-        text,
+        chunks[-1],
         parse_mode="MarkdownV2",
         reply_markup=keyboards.notes_menu(page, total_pages),
     )
@@ -288,10 +295,12 @@ async def notes_filter_callback(update: Update, context: ContextTypes.DEFAULT_TY
         anotes_flat = await _build_assignment_notes_flat(token, assignment_notes)
         context.user_data["anotes_flat"] = anotes_flat
         page = 0
-        text, total_pages = _format_anotes_page(anotes_flat, page)
+        chunks, total_pages = _format_anotes_page(anotes_flat, page)
+        for extra in chunks[:-1]:
+            await query.message.reply_text(extra, parse_mode="MarkdownV2")
         await reply_or_edit(
             query, context,
-            text,
+            chunks[-1],
             parse_mode="MarkdownV2",
             reply_markup=keyboards.assignment_notes_with_pagination(page, total_pages),
         )
@@ -306,8 +315,10 @@ async def notes_filter_callback(update: Update, context: ContextTypes.DEFAULT_TY
             return
         context.user_data["gnotes_list"] = general_notes
         page = 0
-        text, markup = _format_general_notes_page(general_notes, page)
-        await reply_or_edit(query, context, text, parse_mode="MarkdownV2", reply_markup=markup)
+        chunks, markup = _format_general_notes_page(general_notes, page)
+        for extra in chunks[:-1]:
+            await query.message.reply_text(extra, parse_mode="MarkdownV2")
+        await reply_or_edit(query, context, chunks[-1], parse_mode="MarkdownV2", reply_markup=markup)
 
 
 async def _build_assignment_notes_flat(token: str, assignment_notes: list[dict]) -> list[dict]:
@@ -333,13 +344,13 @@ async def _build_assignment_notes_flat(token: str, assignment_notes: list[dict])
     for n, name in zip(assignment_notes, names):
         course_name = course_names.get(n["canvas_course_id"], "Unknown Course")
         flat.append({
-            "summary": f"*{_escape_md(name)}*\n    _{_escape_md(course_name)}_\n    {_escape_md(n['note_text'][:100])}",
+            "summary": f"*{_escape_md(name)}*\n    _{_escape_md(course_name)}_\n    {_escape_md(n['note_text'])}",
         })
     return flat
 
 
-def _format_anotes_page(flat: list[dict], page: int) -> tuple[str, int]:
-    """Format a page of assignment notes. Returns (text, total_pages)."""
+def _format_anotes_page(flat: list[dict], page: int) -> tuple[list[str], int]:
+    """Format a page of assignment notes. Returns (text_chunks, total_pages)."""
     total = len(flat)
     total_pages = max(1, (total + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
     start = page * ITEMS_PER_PAGE
@@ -349,7 +360,7 @@ def _format_anotes_page(flat: list[dict], page: int) -> tuple[str, int]:
     for i, item in enumerate(flat[start:end], start=start + 1):
         lines.append(f"*{i}\\.* {item['summary']}\n")
 
-    return _truncate_message("\n".join(lines)), total_pages
+    return _split_message("\n".join(lines)), total_pages
 
 
 async def anotes_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -372,9 +383,11 @@ async def anotes_page_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.edit_message_text("No assignment notes.", reply_markup=keyboards.back_to_notes())
         return
 
-    text, total_pages = _format_anotes_page(flat, page)
+    chunks, total_pages = _format_anotes_page(flat, page)
+    for extra in chunks[:-1]:
+        await query.message.reply_text(extra, parse_mode="MarkdownV2")
     await query.edit_message_text(
-        text,
+        chunks[-1],
         parse_mode="MarkdownV2",
         reply_markup=keyboards.assignment_notes_with_pagination(page, total_pages),
     )
@@ -382,7 +395,7 @@ async def anotes_page_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
 def _format_general_notes_page(
     general_notes: list[dict], page: int
-) -> tuple[str, InlineKeyboardMarkup]:
+) -> tuple[list[str], InlineKeyboardMarkup]:
     """Format general notes as a numbered list with pagination."""
     total = len(general_notes)
     total_pages = max(1, (total + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
@@ -394,12 +407,12 @@ def _format_general_notes_page(
     for i, n in enumerate(page_notes, start=start + 1):
         created_utc = datetime.fromisoformat(n["created_at"]).replace(tzinfo=timezone.utc)
         created_sgt = created_utc.astimezone(SGT).strftime("%d %b %Y %H:%M") + " SGT"
-        lines.append(f"*{i}\\.* {_escape_md(n['content'][:100])}")
+        lines.append(f"*{i}\\.* {_escape_md(n['content'])}")
         lines.append(f"    _{_escape_md(created_sgt)}_\n")
 
-    text = _truncate_message("\n".join(lines))
+    chunks = _split_message("\n".join(lines))
     markup = keyboards.general_notes_with_delete(page, total_pages)
-    return text, markup
+    return chunks, markup
 
 
 async def gnotes_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -414,8 +427,10 @@ async def gnotes_page_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     context.user_data["gnotes_list"] = general_notes
-    text, markup = _format_general_notes_page(general_notes, page)
-    await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=markup)
+    chunks, markup = _format_general_notes_page(general_notes, page)
+    for extra in chunks[:-1]:
+        await query.message.reply_text(extra, parse_mode="MarkdownV2")
+    await query.edit_message_text(chunks[-1], parse_mode="MarkdownV2", reply_markup=markup)
 
 
 # ── Delete general note (numbered) ──
@@ -524,9 +539,12 @@ async def notes_search_receive(update: Update, context: ContextTypes.DEFAULT_TYP
     header = f"*Search results for \"{_escape_md(query_text)}\"*\n\n"
     text = header + "\n".join(lines)
 
+    chunks = _split_message(text)
+    for extra in chunks[:-1]:
+        await reply(update.message, context, extra, parse_mode="MarkdownV2")
     await reply(
         update.message, context,
-        _truncate_message(text),
+        chunks[-1],
         parse_mode="MarkdownV2",
         reply_markup=keyboards.back_to_notes(),
     )

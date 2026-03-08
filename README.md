@@ -18,6 +18,9 @@ You'll need a **Canvas API token** — generate one from [Canvas](https://canvas
 | `/notes` | View, filter, and search your personal notes |
 | `/start_notes` | Capture freeform notes |
 | `/todos` | Manage personal to-dos per course |
+| `/add_todo` | Create a new to-do item |
+| `/events` | View your custom events (exams, assignments) |
+| `/add_event` | Add a custom exam or assignment event |
 | `/reminder [hour]` | Set a daily deadline reminder (SGT) |
 | `/refresh` | Force a fresh fetch of your course list from Canvas |
 | `/help` | Full command list |
@@ -107,6 +110,7 @@ The bot will initialise the SQLite database on first run and start polling for m
 │       ├── notes.py         # /notes, /start_notes, /end_notes
 │       ├── files.py         # /files, folder browsing
 │       ├── todos.py         # /todos, /add_todo
+│       ├── events.py        # /events, /add_event
 │       └── admin.py         # /admin, /broadcast (optional)
 ├── web/
 │   └── server.py            # aiohttp web server for secure token setup

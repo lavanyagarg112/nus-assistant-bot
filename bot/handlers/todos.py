@@ -11,7 +11,7 @@ from telegram.ext import (
 )
 
 from bot import keyboards
-from bot.handlers.assignments import _escape_md, _truncate_message, TOKEN_EXPIRED_MSG
+from bot.handlers.assignments import _escape_md, _split_message, TOKEN_EXPIRED_MSG
 from bot.utils import check_migration_reminder, make_fallback_command, reply, reply_or_edit
 from canvas.client import CanvasTokenError
 from canvas import client as canvas
@@ -52,8 +52,10 @@ async def todos_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data["todos_show_done"] = show_done
     context.user_data["todos_list"] = todos
     page = 0
-    text, markup = await _format_todos(telegram_id, todos, show_done, page)
-    await reply(update.message, context, text, parse_mode="MarkdownV2", reply_markup=markup)
+    chunks, markup = await _format_todos(telegram_id, todos, show_done, page)
+    for extra in chunks[:-1]:
+        await reply(update.message, context, extra, parse_mode="MarkdownV2")
+    await reply(update.message, context, chunks[-1], parse_mode="MarkdownV2", reply_markup=markup)
 
 
 async def todos_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -73,8 +75,10 @@ async def todos_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data["todos_show_done"] = False
     context.user_data["todos_list"] = todos
     page = 0
-    text, markup = await _format_todos(telegram_id, todos, False, page)
-    await reply_or_edit(query, context, text, parse_mode="MarkdownV2", reply_markup=markup)
+    chunks, markup = await _format_todos(telegram_id, todos, False, page)
+    for extra in chunks[:-1]:
+        await query.message.reply_text(extra, parse_mode="MarkdownV2")
+    await reply_or_edit(query, context, chunks[-1], parse_mode="MarkdownV2", reply_markup=markup)
 
 
 async def _format_todos(
@@ -114,7 +118,7 @@ async def _format_todos(
         lines.append("")
 
     markup = keyboards.todos_list_keyboard(show_done, page, total_pages)
-    return _truncate_message("\n".join(lines)), markup
+    return _split_message("\n".join(lines)), markup
 
 
 # ── Show all / active todos toggle ──
@@ -134,8 +138,10 @@ async def todos_show_all_callback(update: Update, context: ContextTypes.DEFAULT_
 
     context.user_data["todos_show_done"] = show_done
     context.user_data["todos_list"] = todos
-    text, markup = await _format_todos(telegram_id, todos, show_done, 0)
-    await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=markup)
+    chunks, markup = await _format_todos(telegram_id, todos, show_done, 0)
+    for extra in chunks[:-1]:
+        await query.message.reply_text(extra, parse_mode="MarkdownV2")
+    await query.edit_message_text(chunks[-1], parse_mode="MarkdownV2", reply_markup=markup)
 
 
 async def todos_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -151,8 +157,10 @@ async def todos_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     context.user_data["todos_list"] = todos
-    text, markup = await _format_todos(telegram_id, todos, show_done, page)
-    await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=markup)
+    chunks, markup = await _format_todos(telegram_id, todos, show_done, page)
+    for extra in chunks[:-1]:
+        await query.message.reply_text(extra, parse_mode="MarkdownV2")
+    await query.edit_message_text(chunks[-1], parse_mode="MarkdownV2", reply_markup=markup)
 
 
 # ── Toggle todo (numbered conversation) ──

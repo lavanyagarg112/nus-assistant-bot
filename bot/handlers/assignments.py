@@ -319,8 +319,8 @@ async def quiz_detail_callback(
 
 async def _fetch_and_format_due(
     token: str, days: int, show_submitted: bool = False, telegram_id: int | None = None
-) -> tuple[str | None, InlineKeyboardMarkup]:
-    """Fetch upcoming assignments and return (MarkdownV2 text, keyboard).
+) -> tuple[list[str] | None, InlineKeyboardMarkup]:
+    """Fetch upcoming assignments and return (MarkdownV2 text chunks, keyboard).
 
     Returns (None, keyboard) if no items at all.
     """
@@ -391,7 +391,7 @@ async def _fetch_and_format_due(
     elif submitted:
         lines.append(f"_{_escape_md(str(len(submitted)))} submitted item\\(s\\) hidden_")
 
-    return _truncate_message("\n".join(lines)), markup
+    return _split_message("\n".join(lines)), markup
 
 
 def _parse_days(args: list[str]) -> int:
@@ -414,7 +414,7 @@ async def due_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.message
     loading = await reply(msg, context, "Loading upcoming deadlines...")
     try:
-        text, markup = await _fetch_and_format_due(token, days, telegram_id=update.effective_user.id)
+        chunks, markup = await _fetch_and_format_due(token, days, telegram_id=update.effective_user.id)
     except CanvasTokenError:
         await loading.edit_text(TOKEN_EXPIRED_MSG)
         return
@@ -423,15 +423,17 @@ async def due_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await loading.edit_text("Failed to fetch assignments.")
         return
 
-    if not text:
+    if not chunks:
         await loading.edit_text(
             f"No assignments due in the next {days} days!",
             reply_markup=markup,
         )
         return
 
+    for extra in chunks[:-1]:
+        await loading.reply_text(extra, parse_mode="MarkdownV2")
     await loading.edit_text(
-        text,
+        chunks[-1],
         parse_mode="MarkdownV2",
         reply_markup=markup,
     )
@@ -447,7 +449,7 @@ async def due_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     days = 7
     loading = await reply_or_edit(query, context, "Loading upcoming deadlines...")
     try:
-        text, markup = await _fetch_and_format_due(token, days, telegram_id=update.effective_user.id)
+        chunks, markup = await _fetch_and_format_due(token, days, telegram_id=update.effective_user.id)
     except CanvasTokenError:
         await loading.edit_text(TOKEN_EXPIRED_MSG)
         return
@@ -456,15 +458,17 @@ async def due_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await loading.edit_text("Failed to fetch assignments.")
         return
 
-    if not text:
+    if not chunks:
         await loading.edit_text(
             f"No assignments due in the next {days} days!",
             reply_markup=markup,
         )
         return
 
+    for extra in chunks[:-1]:
+        await loading.reply_text(extra, parse_mode="MarkdownV2")
     await loading.edit_text(
-        text,
+        chunks[-1],
         parse_mode="MarkdownV2",
         reply_markup=markup,
     )
@@ -483,7 +487,7 @@ async def due_toggle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     days = int(parts[3]) if len(parts) > 3 else 7
 
     try:
-        text, markup = await _fetch_and_format_due(token, days, show_submitted=show_submitted, telegram_id=update.effective_user.id)
+        chunks, markup = await _fetch_and_format_due(token, days, show_submitted=show_submitted, telegram_id=update.effective_user.id)
     except CanvasTokenError:
         await query.edit_message_text(TOKEN_EXPIRED_MSG)
         return
@@ -492,15 +496,17 @@ async def due_toggle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text("Failed to fetch assignments.")
         return
 
-    if not text:
+    if not chunks:
         await query.edit_message_text(
             f"No assignments due in the next {days} days!",
             reply_markup=markup,
         )
         return
 
+    for extra in chunks[:-1]:
+        await query.message.reply_text(extra, parse_mode="MarkdownV2")
     await query.edit_message_text(
-        text,
+        chunks[-1],
         parse_mode="MarkdownV2",
         reply_markup=markup,
     )
@@ -527,8 +533,31 @@ def _escape_url(url: str) -> str:
 TELEGRAM_MSG_LIMIT = 4096
 
 
-def _truncate_message(text: str, suffix: str = "\n\n\\.\\.\\.message truncated") -> str:
-    """Truncate a MarkdownV2 message to fit Telegram's 4096 char limit."""
+def _split_message(text: str) -> list[str]:
+    """Split a MarkdownV2 message into chunks that fit Telegram's 4096 char limit.
+
+    Splits on newline boundaries so formatting is preserved.
+    """
     if len(text) <= TELEGRAM_MSG_LIMIT:
-        return text
-    return text[: TELEGRAM_MSG_LIMIT - len(suffix)] + suffix
+        return [text]
+
+    chunks = []
+    while text:
+        if len(text) <= TELEGRAM_MSG_LIMIT:
+            chunks.append(text)
+            break
+        # Find last newline within limit
+        cut = text.rfind("\n", 0, TELEGRAM_MSG_LIMIT)
+        if cut <= 0:
+            # No newline found; hard cut
+            cut = TELEGRAM_MSG_LIMIT
+        chunks.append(text[:cut])
+        text = text[cut:].lstrip("\n")
+    return chunks
+
+
+# Keep backward-compatible alias used by callers that only expect a single string
+def _truncate_message(text: str, suffix: str = "") -> str:
+    """Return the first chunk of a split message (no truncation)."""
+    parts = _split_message(text)
+    return parts[0] if parts else text
