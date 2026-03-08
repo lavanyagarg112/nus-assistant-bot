@@ -205,6 +205,8 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(notes.notes_filter_callback, pattern=r"^notes_filter_(assignment|general)$"))
     app.add_handler(CallbackQueryHandler(notes.note_delete, pattern=r"^note_del_\d+_\d+$"))
     app.add_handler(CallbackQueryHandler(notes.gnotes_page_callback, pattern=r"^gnotes_page_\d+$"))
+    app.add_handler(CallbackQueryHandler(notes.notes_page_callback, pattern=r"^notes_page_\d+$"))
+    app.add_handler(CallbackQueryHandler(notes.anotes_page_callback, pattern=r"^anotes_page_\d+$"))
     app.add_handler(CallbackQueryHandler(events.events_callback, pattern="^cmd_events$"))
     app.add_handler(CallbackQueryHandler(events.events_page_callback, pattern=r"^events_page_\d+$"))
 

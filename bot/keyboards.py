@@ -122,17 +122,36 @@ def file_back(course_id: int) -> InlineKeyboardMarkup:
     ])
 
 
-def notes_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("Assignment Notes", callback_data="notes_filter_assignment"),
-            InlineKeyboardButton("General Notes", callback_data="notes_filter_general"),
-        ],
-        [
-            InlineKeyboardButton("Search Notes", callback_data="notes_search"),
-        ],
-        [InlineKeyboardButton("<< Back to Menu", callback_data="cmd_menu")],
+def notes_menu(page: int = 0, total_pages: int = 1) -> InlineKeyboardMarkup:
+    buttons = []
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton("< Prev", callback_data=f"notes_page_{page - 1}"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton("Next >", callback_data=f"notes_page_{page + 1}"))
+    if nav_row:
+        buttons.append(nav_row)
+    buttons.append([
+        InlineKeyboardButton("Assignment Notes", callback_data="notes_filter_assignment"),
+        InlineKeyboardButton("General Notes", callback_data="notes_filter_general"),
     ])
+    buttons.append([InlineKeyboardButton("Search Notes", callback_data="notes_search")])
+    buttons.append([InlineKeyboardButton("<< Back to Menu", callback_data="cmd_menu")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def assignment_notes_with_pagination(page: int, total_pages: int) -> InlineKeyboardMarkup:
+    buttons = []
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton("< Prev", callback_data=f"anotes_page_{page - 1}"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton("Next >", callback_data=f"anotes_page_{page + 1}"))
+    if nav_row:
+        buttons.append(nav_row)
+    buttons.append([InlineKeyboardButton("<< Back to Notes", callback_data="cmd_notes")])
+    buttons.append([InlineKeyboardButton("<< Back to Menu", callback_data="cmd_menu")])
+    return InlineKeyboardMarkup(buttons)
 
 
 def back_to_notes() -> InlineKeyboardMarkup:

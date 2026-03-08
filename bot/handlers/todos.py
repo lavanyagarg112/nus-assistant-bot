@@ -168,7 +168,8 @@ async def todos_toggle_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return ConversationHandler.END
 
     context.user_data["toggle_todo_ids"] = [t["id"] for t in todos]
-    await reply_or_edit(query, context, "Send the number of the todo to toggle done/undone (or /cancel):")
+    # Send as new message so the numbered list stays visible
+    await query.message.reply_text("Send the number of the todo to toggle done/undone (or /cancel):")
     return WAITING_TODO_TOGGLE_NUM
 
 
@@ -216,7 +217,8 @@ async def todos_delete_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return ConversationHandler.END
 
     context.user_data["delete_todo_ids"] = [t["id"] for t in todos]
-    await reply_or_edit(query, context, "Send the number of the todo to delete (or /cancel):")
+    # Send as new message so the numbered list stays visible
+    await query.message.reply_text("Send the number of the todo to delete (or /cancel):")
     return WAITING_TODO_DELETE_NUM
 
 

@@ -139,7 +139,8 @@ async def events_delete_start(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # Store IDs for mapping
     context.user_data["delete_event_ids"] = [e["id"] for e in events]
-    await reply_or_edit(query, context, "Send the number of the event to delete (or /cancel):")
+    # Send as new message so the numbered list stays visible
+    await query.message.reply_text("Send the number of the event to delete (or /cancel):")
     return WAITING_EVENT_DELETE_NUM
 
 
